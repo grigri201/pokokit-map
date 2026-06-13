@@ -39,6 +39,23 @@ describe('Island Designer scaffold persistence', () => {
     expect(await screen.findByText('已保存到此浏览器')).toBeInTheDocument();
   });
 
+  it('restores anonymous saved region notes from localStorage after reload', async () => {
+    const storage = memoryStorage();
+    const fetcher = mockFetch([{ data: { user: null } }, { data: { user: null } }]);
+    const { unmount } = render(<App config={config} fetcher={fetcher} storage={storage} />);
+
+    await createRegionFromCells('营地区', '刷新后仍应恢复', 'map-cell-7-7');
+    await userEvent.click(screen.getByRole('button', { name: '保存当前规划' }));
+    await waitFor(() => expect(storage.getItem(localIslandStorageKey)).toContain('营地区'));
+
+    unmount();
+    render(<App config={config} fetcher={fetcher} storage={storage} />);
+
+    expect(await screen.findByText('营地区')).toBeInTheDocument();
+    expect(screen.getByText('刷新后仍应恢复')).toBeInTheDocument();
+    expect(screen.getByTestId('map-cell-7-7')).toHaveAttribute('data-region-id', 'region-1');
+  });
+
   it('handles unavailable localStorage without crashing the workbench', async () => {
     render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={throwingStorage()} />);
 
