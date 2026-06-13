@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -68,8 +68,8 @@ describe('Island Designer scaffold persistence', () => {
     await userEvent.click(screen.getByRole('button', { name: '创建说明' }));
 
     expect(cell).toHaveAttribute('data-region-id', 'region-1');
-    expect(screen.getByText('入口花园')).toBeInTheDocument();
-    expect(screen.getByText('这里放欢迎区和花圃')).toBeInTheDocument();
+    expect(screen.getAllByText('入口花园').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('这里放欢迎区和花圃').length).toBeGreaterThan(0);
     expect(screen.getByText('1 个格子')).toBeInTheDocument();
     expect(screen.getByText('本地待保存')).toBeInTheDocument();
   });
@@ -96,6 +96,58 @@ describe('Island Designer scaffold persistence', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent('市集区');
     expect(screen.getByRole('tooltip')).toHaveTextContent('横向铺开摊位');
     expect(screen.getByRole('tooltip')).toHaveTextContent('6 个格子');
+  });
+
+  it('lists saved region records and flashes the map region when selected', async () => {
+    render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={memoryStorage()} />);
+
+    await createRegionFromCells('市集区', '横向铺开摊位', 'map-cell-1-1', 'map-cell-3-2');
+
+    const list = screen.getByLabelText('说明记录列表');
+    expect(within(list).getByText('市集区')).toBeInTheDocument();
+    expect(within(list).getByText('横向铺开摊位')).toBeInTheDocument();
+    expect(within(list).getByText('6 格')).toBeInTheDocument();
+
+    await userEvent.click(within(list).getByRole('button', { name: /市集区/ }));
+
+    expect(screen.getByTestId('map-cell-1-1')).toHaveClass('flash');
+    expect(screen.getByTestId('map-cell-3-2')).toHaveClass('flash');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('市集区');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('横向铺开摊位');
+  });
+
+  it('keeps delete separate from locate and supports cancel then confirm', async () => {
+    render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={memoryStorage()} />);
+
+    await createRegionFromCells('住宅区', '不要被删除按钮触发定位', 'map-cell-4-4');
+    const cell = screen.getByTestId('map-cell-4-4');
+    const list = screen.getByLabelText('说明记录列表');
+
+    await userEvent.click(within(list).getByRole('button', { name: '删除' }));
+
+    expect(within(list).getByText('确认删除？')).toBeInTheDocument();
+    expect(cell).not.toHaveClass('flash');
+
+    await userEvent.click(within(list).getByRole('button', { name: '取消' }));
+    expect(within(list).getByText('住宅区')).toBeInTheDocument();
+    expect(cell).toHaveAttribute('data-region-id', 'region-1');
+
+    await userEvent.click(within(list).getByRole('button', { name: '删除' }));
+    await userEvent.click(within(list).getByRole('button', { name: '确认删除' }));
+
+    expect(within(list).queryByText('住宅区')).not.toBeInTheDocument();
+    expect(within(list).getByText('暂无说明记录')).toBeInTheDocument();
+    expect(cell).not.toHaveAttribute('data-region-id');
+  });
+
+  it('shows tooltip content when a saved region cell receives keyboard focus', async () => {
+    render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={memoryStorage()} />);
+
+    await createRegionFromCells('灯塔区', '键盘焦点也能看到说明', 'map-cell-6-6');
+    fireEvent.focus(screen.getByTestId('map-cell-6-6'));
+
+    expect(screen.getByRole('tooltip')).toHaveTextContent('灯塔区');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('键盘焦点也能看到说明');
   });
 
   it('restores a domain session and loads the first cloud island', async () => {
@@ -202,4 +254,23 @@ function throwingStorage(): StorageLike {
       throw new Error('storage blocked');
     },
   };
+}
+
+async function createRegionFromCells(label: string, note: string, startTestId: string, endTestId?: string) {
+  await screen.findByText(/未登录：仅保存在此浏览器 localStorage/);
+  const start = screen.getByTestId(startTestId);
+  fireEvent.pointerDown(start);
+  if (endTestId) {
+    const end = screen.getByTestId(endTestId);
+    fireEvent.pointerEnter(end);
+    fireEvent.pointerUp(end);
+  } else {
+    fireEvent.pointerUp(start);
+  }
+
+  await userEvent.clear(screen.getByLabelText('区域标题'));
+  await userEvent.type(screen.getByLabelText('区域标题'), label);
+  await userEvent.clear(screen.getByLabelText('说明文字'));
+  await userEvent.type(screen.getByLabelText('说明文字'), note);
+  await userEvent.click(screen.getByRole('button', { name: '创建说明' }));
 }

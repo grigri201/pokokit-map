@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { restoreDomainSession, type DomainSessionUser } from './auth/domain-session';
 import {
@@ -7,6 +7,7 @@ import {
   getActiveMap,
   islandRegionPalette,
   nextIslandRegionId,
+  removeIslandRegion,
   type IslandCell,
   type IslandDocumentV1,
   type IslandRegion,
@@ -66,6 +67,10 @@ export function App({ config = readAppConfig(), fetcher = fetch, storage = windo
   const [regionError, setRegionError] = useState<string | null>(null);
   const [activeTooltip, setActiveTooltip] = useState<RegionTooltip | null>(null);
   const [regionSequence, setRegionSequence] = useState(1);
+  const [focusedRegionId, setFocusedRegionId] = useState<string | null>(null);
+  const [flashRegionId, setFlashRegionId] = useState<string | null>(null);
+  const [pendingDeleteRegionId, setPendingDeleteRegionId] = useState<string | null>(null);
+  const mapCellRefs = useRef(new Map<string, HTMLButtonElement>());
 
   const apiClient = useMemo(() => new IslandApiClient({ apiBaseUrl: config.apiBaseUrl, fetcher }), [config.apiBaseUrl, fetcher]);
 
@@ -130,6 +135,14 @@ export function App({ config = readAppConfig(), fetcher = fetch, storage = windo
       cancelled = true;
     };
   }, [config.apiBaseUrl, fetcher, loadCloudIsland, storage]);
+
+  useEffect(() => {
+    if (!flashRegionId) {
+      return undefined;
+    }
+    const timeoutId = window.setTimeout(() => setFlashRegionId(null), 1100);
+    return () => window.clearTimeout(timeoutId);
+  }, [flashRegionId]);
 
   const saveNow = useCallback(async () => {
     setSaveState('pending');
@@ -275,6 +288,41 @@ export function App({ config = readAppConfig(), fetcher = fetch, storage = windo
     setErrorMessage(null);
   }, [activeMap.regions, document, regionDraft.color, regionDraft.label, regionDraft.note, regionSequence, selection.cells]);
 
+  const selectRegion = useCallback((region: IslandRegion) => {
+    const firstCell = region.cells[0];
+    if (firstCell) {
+      const element = mapCellRefs.current.get(cellKey(firstCell));
+      if (typeof element?.scrollIntoView === 'function') {
+        element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+      }
+    }
+    setFocusedRegionId(region.id);
+    setFlashRegionId(region.id);
+    setActiveTooltip({ region, cellCount: region.cells.length });
+  }, []);
+
+  const deleteRegion = useCallback((regionId: string) => {
+    const result = removeIslandRegion(document, regionId);
+    if (!result.ok) {
+      setRegionError(result.message);
+      return;
+    }
+    setDocument(result.document);
+    setPendingDeleteRegionId(null);
+    setSelection(clearSelection());
+    setSaveState('idle');
+    setRegionError(null);
+    if (activeTooltip?.region.id === regionId) {
+      setActiveTooltip(null);
+    }
+    if (focusedRegionId === regionId) {
+      setFocusedRegionId(null);
+    }
+    if (flashRegionId === regionId) {
+      setFlashRegionId(null);
+    }
+  }, [activeTooltip?.region.id, document, flashRegionId, focusedRegionId]);
+
   return (
     <main className="workspace">
       <aside className="side-panel" aria-label="保存和登录状态">
@@ -363,6 +411,54 @@ export function App({ config = readAppConfig(), fetcher = fetch, storage = windo
             <button className="secondary-action" type="submit" disabled={!canCreateRegion}>创建说明</button>
           </form>
         </section>
+
+        <section className="region-list-panel" aria-label="说明记录列表">
+          <div>
+            <p className="eyebrow">Records</p>
+            <strong>说明记录</strong>
+          </div>
+          {activeMap.regions.length === 0 ? (
+            <p className="empty-records">暂无说明记录</p>
+          ) : (
+            <ul className="region-list">
+              {activeMap.regions.map(region => (
+                <li key={region.id} className={focusedRegionId === region.id ? 'active' : undefined}>
+                  <button
+                    type="button"
+                    className="region-list-main"
+                    onClick={() => selectRegion(region)}
+                    onFocus={() => setActiveTooltip({ region, cellCount: region.cells.length })}
+                  >
+                    <span className="record-swatch" style={{ '--swatch-color': region.color } as CSSProperties} aria-hidden="true" />
+                    <span className="record-copy">
+                      <strong>{region.label}</strong>
+                      <span>{summarizeRegionNote(region.note)}</span>
+                    </span>
+                    <span className="record-meta">
+                      <span>{region.cells.length} 格</span>
+                      <small>{formatRegionTimestamp(region.updatedAt)}</small>
+                    </span>
+                  </button>
+                  {pendingDeleteRegionId === region.id ? (
+                    <div className="delete-confirm" aria-label={`${region.label} 删除确认`}>
+                      <span>确认删除？</span>
+                      <button type="button" onClick={() => deleteRegion(region.id)}>确认删除</button>
+                      <button type="button" onClick={() => setPendingDeleteRegionId(null)}>取消</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="delete-region"
+                      onClick={() => setPendingDeleteRegionId(region.id)}
+                    >
+                      删除
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </aside>
 
       <section className="map-workbench" aria-label="第一张岛屿地图">
@@ -396,6 +492,8 @@ export function App({ config = readAppConfig(), fetcher = fetch, storage = windo
                 'map-cell',
                 selected ? 'selected' : '',
                 region ? 'saved' : '',
+                region?.id === focusedRegionId ? 'focused' : '',
+                region?.id === flashRegionId ? 'flash' : '',
               ].filter(Boolean).join(' ');
               return (
                 <button
@@ -404,6 +502,13 @@ export function App({ config = readAppConfig(), fetcher = fetch, storage = windo
                   role="gridcell"
                   className={className}
                   style={region ? { '--region-color': region.color } as CSSProperties : undefined}
+                  ref={element => {
+                    if (element) {
+                      mapCellRefs.current.set(key, element);
+                    } else {
+                      mapCellRefs.current.delete(key);
+                    }
+                  }}
                   data-testid={`map-cell-${cell.x}-${cell.y}`}
                   data-region-id={region?.id}
                   aria-label={region ? `格子 ${cell.x + 1},${cell.y + 1}：${region.label}` : `格子 ${cell.x + 1},${cell.y + 1}`}
@@ -436,4 +541,13 @@ function readSafeError(error: unknown, fallback: string): string {
     return error.message;
   }
   return fallback;
+}
+
+function summarizeRegionNote(note: string): string {
+  return note.length > 34 ? `${note.slice(0, 34)}...` : note;
+}
+
+function formatRegionTimestamp(timestamp: string): string {
+  const [date = timestamp, time = ''] = timestamp.split('T');
+  return `${date.slice(5)} ${time.slice(0, 5)}`.trim();
 }

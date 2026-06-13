@@ -47,6 +47,10 @@ export type CreateIslandRegionResult =
   | { ok: true; document: IslandDocumentV1; region: IslandRegion }
   | { ok: false; message: string };
 
+export type RemoveIslandRegionResult =
+  | { ok: true; document: IslandDocumentV1; removed: IslandRegion }
+  | { ok: false; message: string };
+
 export function createDefaultIslandDocument(now = new Date().toISOString()): IslandDocumentV1 {
   return {
     version: 1,
@@ -123,6 +127,28 @@ export function nextIslandRegionId(regions: IslandRegion[], seed = 1): string {
     index += 1;
   }
   return `region-${index}`;
+}
+
+export function removeIslandRegion(document: IslandDocumentV1, regionId: string, now = new Date().toISOString()): RemoveIslandRegionResult {
+  const activeMap = getActiveMap(document);
+  const removed = activeMap.regions.find(region => region.id === regionId);
+  if (!removed) {
+    return { ok: false, message: '未找到要删除的区域说明。' };
+  }
+
+  return {
+    ok: true,
+    removed,
+    document: {
+      ...document,
+      updatedAt: now,
+      maps: document.maps.map(map => (
+        map.id === activeMap.id
+          ? { ...map, regions: map.regions.filter(region => region.id !== regionId) }
+          : map
+      )),
+    },
+  };
 }
 
 export function isIslandDocumentV1(value: unknown): value is IslandDocumentV1 {
