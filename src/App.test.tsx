@@ -18,25 +18,68 @@ describe('Island Designer scaffold persistence', () => {
     vi.restoreAllMocks();
   });
 
-  it('shows a persistent anonymous local-only disclosure', async () => {
+  it('shows a compact top-left tool group without the old Island Designer block', async () => {
     render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={memoryStorage()} />);
 
-    expect(await screen.findByText(/未登录：仅保存在此浏览器 localStorage/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '登录同步' })).toHaveAttribute('href', 'https://gallery.pokokit.com');
-    expect(screen.getByRole('button', { name: '保存当前规划' })).toBeInTheDocument();
+    const toolbar = await screen.findByRole('group', { name: '主工具栏' });
+    expect(within(toolbar).getByRole('link', { name: '登录' })).toHaveAttribute('href', 'https://gallery.pokokit.com');
+    expect(within(toolbar).getByRole('button', { name: '文件' })).toBeInTheDocument();
+    expect(within(toolbar).getByRole('button', { name: '导出' })).toBeInTheDocument();
+    expect(screen.queryByText(/Island Designer/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('岛屿规划工作台')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '地图名称' })).toHaveValue('第一张岛屿地图');
+    expect(screen.queryByText('Map 01')).not.toBeInTheDocument();
+    expect(screen.queryByText('Grid')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '保存当前规划' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('gridcell')).toHaveLength(23 * 23);
+    expect(screen.getByTestId('map-cell-0-0')).toHaveAttribute('style', expect.stringContaining('--terrain-color: #3587d7'));
+    expect(screen.getByTestId('map-cell-11-11')).toHaveAttribute('style', expect.stringContaining('--terrain-color: #e9bad1'));
+    expect(screen.getByTestId('map-cell-22-22')).toHaveAttribute('style', expect.stringContaining('--terrain-color: #3086d8'));
+    expect(screen.queryByTestId('map-cell-23-0')).not.toBeInTheDocument();
+    const mapSurface = screen.getByRole('grid', { name: '第一张巨大岛屿地图' });
+    expect(mapSurface).toHaveAttribute('style', expect.stringContaining('--map-subcell-size: 12px'));
+    expect(mapSurface).not.toHaveClass('show-subgrid');
+    const regionPanel = screen.getByLabelText('创建区域说明');
+    expect(within(regionPanel).getAllByRole('textbox')).toHaveLength(2);
+    expect(within(regionPanel).queryByLabelText('已选择格子数量')).not.toBeInTheDocument();
+    expect(within(regionPanel).queryByText('Region')).not.toBeInTheDocument();
+    expect(within(regionPanel).queryByText('未选择格子')).not.toBeInTheDocument();
+    expect(within(regionPanel).queryByText('区域标题')).not.toBeInTheDocument();
+    expect(within(regionPanel).queryByText('说明文字')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('说明记录列表')).not.toBeInTheDocument();
   });
 
-  it('writes anonymous saves to localStorage', async () => {
+  it('uses the Chinese default map title when an empty title loses focus in a Chinese locale', async () => {
+    render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} locale="zh-CN" storage={memoryStorage()} />);
+
+    const titleInput = await screen.findByRole('textbox', { name: '地图名称' });
+    await userEvent.clear(titleInput);
+    expect(titleInput).toHaveValue('');
+    fireEvent.blur(titleInput);
+
+    expect(titleInput).toHaveValue('云岛');
+  });
+
+  it('uses the English default map title when an empty title loses focus outside Chinese locales', async () => {
+    render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} locale="en-US" storage={memoryStorage()} />);
+
+    const titleInput = await screen.findByRole('textbox', { name: '地图名称' });
+    await userEvent.clear(titleInput);
+    fireEvent.blur(titleInput);
+
+    expect(titleInput).toHaveValue('Cloud Island');
+  });
+
+  it('automatically writes anonymous plans to localStorage', async () => {
     const storage = memoryStorage();
     render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={storage} />);
 
-    await screen.findByText(/未登录：仅保存在此浏览器 localStorage/);
-    await userEvent.click(screen.getByRole('button', { name: '保存当前规划' }));
+    await screen.findByRole('group', { name: '主工具栏' });
+    await waitFor(() => expect(storage.getItem(localIslandStorageKey)).not.toBeNull());
 
     const saved = storage.getItem(localIslandStorageKey);
-    expect(saved).not.toBeNull();
     expect(JSON.parse(saved!)).toMatchObject({ version: 1, activeMapId: 'map-1' });
-    expect(await screen.findByText('已保存到此浏览器')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('title', '已保存到此浏览器');
   });
 
   it('restores anonymous saved region notes from localStorage after reload', async () => {
@@ -45,41 +88,105 @@ describe('Island Designer scaffold persistence', () => {
     const { unmount } = render(<App config={config} fetcher={fetcher} storage={storage} />);
 
     await createRegionFromCells('营地区', '刷新后仍应恢复', 'map-cell-7-7');
-    await userEvent.click(screen.getByRole('button', { name: '保存当前规划' }));
     await waitFor(() => expect(storage.getItem(localIslandStorageKey)).toContain('营地区'));
 
     unmount();
     render(<App config={config} fetcher={fetcher} storage={storage} />);
 
-    expect(await screen.findByText('营地区')).toBeInTheDocument();
-    expect(screen.getByText('刷新后仍应恢复')).toBeInTheDocument();
-    expect(screen.getByTestId('map-cell-7-7')).toHaveAttribute('data-region-id', 'region-1');
+    const list = await screen.findByLabelText('说明记录列表');
+    expect(within(list).getByRole('button', { name: '营地区' })).toBeInTheDocument();
+    expect(within(list).queryByText('刷新后仍应恢复')).not.toBeInTheDocument();
+    const restoredCell = screen.getByTestId('map-cell-7-7');
+    expect(restoredCell).toHaveAttribute('data-region-id', 'region-1');
+    fireEvent.focus(restoredCell);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('刷新后仍应恢复');
+  });
+
+  it('normalizes legacy local 48 by 32 maps to the 92 by 92 terrain grid', async () => {
+    const legacyDocument = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
+    legacyDocument.maps[0] = {
+      ...legacyDocument.maps[0]!,
+      grid: { width: 48, height: 32 },
+      regions: [
+        {
+          id: 'region-1',
+          label: '旧区域',
+          note: '只保留仍在地图内的格子',
+          color: '#2f7dd1',
+          cells: [{ x: 22, y: 22 }, { x: 23, y: 0 }, { x: 47, y: 31 }],
+          createdAt: '2026-06-13T00:00:00.000Z',
+          updatedAt: '2026-06-13T00:00:00.000Z',
+        },
+      ],
+    };
+    const storage = memoryStorage({ [localIslandStorageKey]: JSON.stringify(legacyDocument) });
+
+    render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={storage} />);
+
+    await screen.findByRole('group', { name: '主工具栏' });
+    expect(screen.getAllByRole('gridcell')).toHaveLength(23 * 23);
+    expect(screen.getByTestId('map-cell-22-22')).toHaveAttribute('data-region-id', 'region-1');
+    expect(screen.queryByTestId('map-cell-23-0')).not.toBeInTheDocument();
+    await waitFor(() => {
+      const saved = JSON.parse(storage.getItem(localIslandStorageKey)!);
+      expect(saved.maps[0].grid).toEqual({ width: 92, height: 92 });
+      expect(saved.maps[0].regions[0].cells).toHaveLength(4 * 4);
+      expect(saved.maps[0].regions[0].cells[0]).toEqual({ x: 88, y: 88 });
+    });
+  });
+
+  it('zooms with the wheel and only drags the map from non-cell space', async () => {
+    render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={memoryStorage()} />);
+
+    await screen.findByRole('group', { name: '主工具栏' });
+    const canvas = screen.getByTestId('map-canvas');
+    const surface = screen.getByRole('grid', { name: '第一张巨大岛屿地图' });
+    const initialTransform = surface.getAttribute('style');
+
+    fireEvent.wheel(canvas, { deltaY: -100, clientX: 500, clientY: 300 });
+    expect(surface.getAttribute('style')).not.toBe(initialTransform);
+    const afterWheelTransform = surface.getAttribute('style');
+    expect(surface).not.toHaveClass('show-subgrid');
+
+    fireEvent.wheel(canvas, { deltaY: -100, clientX: 500, clientY: 300 });
+    fireEvent.wheel(canvas, { deltaY: -100, clientX: 500, clientY: 300 });
+    fireEvent.wheel(canvas, { deltaY: -100, clientX: 500, clientY: 300 });
+    expect(surface).toHaveClass('show-subgrid');
+
+    fireEvent.pointerDown(screen.getByTestId('map-cell-0-0'), { pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 220, clientY: 220 });
+    expect(surface.getAttribute('style')).not.toBe(afterWheelTransform);
+    const afterCellPointerTransform = surface.getAttribute('style');
+
+    fireEvent.pointerDown(canvas, { pointerId: 2, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 2, clientX: 220, clientY: 240 });
+    fireEvent.pointerUp(canvas, { pointerId: 2, clientX: 220, clientY: 240 });
+    expect(surface.getAttribute('style')).not.toBe(afterCellPointerTransform);
   });
 
   it('handles unavailable localStorage without crashing the workbench', async () => {
     render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={throwingStorage()} />);
 
-    expect(await screen.findByText(/无法访问本地保存/)).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: '主工具栏' })).toBeInTheDocument();
     expect(screen.getByRole('grid', { name: '第一张巨大岛屿地图' })).toBeInTheDocument();
   });
 
   it('shows recoverable auth restore failures without blocking local editing', async () => {
     render(<App config={config} fetcher={mockFetch([{ error: { code: 'server_error', message: 'Internal provider failure' }, status: 500 }])} storage={memoryStorage()} />);
 
-    expect(await screen.findByText('无法恢复云端登录状态，可继续本地编辑。')).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: '主工具栏' })).toBeInTheDocument();
     expect(screen.getByRole('grid', { name: '第一张巨大岛屿地图' })).toBeInTheDocument();
-    expect(screen.getByText('本地待保存')).toBeInTheDocument();
   });
 
-  it('creates a note region from a single selected cell and renders the overlay tooltip', async () => {
+  it('creates a note region from a single macro cell and renders the overlay tooltip', async () => {
     render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={memoryStorage()} />);
 
-    await screen.findByText(/未登录：仅保存在此浏览器 localStorage/);
+    await screen.findByRole('group', { name: '主工具栏' });
     const cell = screen.getByTestId('map-cell-2-3');
     fireEvent.pointerDown(cell);
     fireEvent.pointerUp(cell);
 
-    expect(screen.getByText('1 个格子已选择')).toBeInTheDocument();
+    expect(screen.queryByLabelText('已选择格子数量')).not.toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('区域标题'), '入口花园');
     await userEvent.type(screen.getByLabelText('说明文字'), '这里放欢迎区和花圃');
     await userEvent.click(screen.getByRole('button', { name: '创建说明' }));
@@ -87,21 +194,56 @@ describe('Island Designer scaffold persistence', () => {
     expect(cell).toHaveAttribute('data-region-id', 'region-1');
     expect(screen.getAllByText('入口花园').length).toBeGreaterThan(0);
     expect(screen.getAllByText('这里放欢迎区和花圃').length).toBeGreaterThan(0);
+    expect(screen.getByText('16 个格子')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('title', '本地待保存');
+  });
+
+  it('creates a note region from a single subcell after zooming into the subgrid', async () => {
+    render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={memoryStorage()} />);
+
+    await screen.findByRole('group', { name: '主工具栏' });
+    const canvas = screen.getByTestId('map-canvas');
+    const surface = screen.getByRole('grid', { name: '第一张巨大岛屿地图' });
+    fireEvent.wheel(canvas, { deltaY: -100, clientX: 500, clientY: 300 });
+    fireEvent.wheel(canvas, { deltaY: -100, clientX: 500, clientY: 300 });
+    fireEvent.wheel(canvas, { deltaY: -100, clientX: 500, clientY: 300 });
+    fireEvent.wheel(canvas, { deltaY: -100, clientX: 500, clientY: 300 });
+    expect(surface).toHaveClass('show-subgrid');
+
+    const macroCell = screen.getByTestId('map-cell-2-3');
+    macroCell.getBoundingClientRect = vi.fn(() => ({
+      bottom: 48,
+      height: 48,
+      left: 0,
+      right: 48,
+      top: 0,
+      width: 48,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }));
+    fireEvent.pointerDown(macroCell, { clientX: 4, clientY: 4 });
+    fireEvent.pointerUp(macroCell, { clientX: 4, clientY: 4 });
+
+    await userEvent.type(screen.getByLabelText('区域标题'), '小格入口');
+    await userEvent.type(screen.getByLabelText('说明文字'), '只标记一个小格');
+    await userEvent.click(screen.getByRole('button', { name: '创建说明' }));
+
     expect(screen.getByText('1 个格子')).toBeInTheDocument();
-    expect(screen.getByText('本地待保存')).toBeInTheDocument();
+    expect(macroCell.querySelectorAll('.map-subcell.saved')).toHaveLength(1);
   });
 
   it('supports rectangular drag selection and saved region focus tooltip', async () => {
     render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={memoryStorage()} />);
 
-    await screen.findByText(/未登录：仅保存在此浏览器 localStorage/);
+    await screen.findByRole('group', { name: '主工具栏' });
     const start = screen.getByTestId('map-cell-1-1');
     const end = screen.getByTestId('map-cell-3-2');
     fireEvent.pointerDown(start);
     fireEvent.pointerEnter(end);
     fireEvent.pointerUp(end);
 
-    expect(screen.getByText('6 个格子已选择')).toBeInTheDocument();
+    expect(screen.queryByLabelText('已选择格子数量')).not.toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('区域标题'), '市集区');
     await userEvent.type(screen.getByLabelText('说明文字'), '横向铺开摊位');
     await userEvent.click(screen.getByRole('button', { name: '创建说明' }));
@@ -112,7 +254,7 @@ describe('Island Designer scaffold persistence', () => {
 
     expect(screen.getByRole('tooltip')).toHaveTextContent('市集区');
     expect(screen.getByRole('tooltip')).toHaveTextContent('横向铺开摊位');
-    expect(screen.getByRole('tooltip')).toHaveTextContent('6 个格子');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('96 个格子');
   });
 
   it('lists saved region records and flashes the map region when selected', async () => {
@@ -122,8 +264,11 @@ describe('Island Designer scaffold persistence', () => {
 
     const list = screen.getByLabelText('说明记录列表');
     expect(within(list).getByText('市集区')).toBeInTheDocument();
-    expect(within(list).getByText('横向铺开摊位')).toBeInTheDocument();
-    expect(within(list).getByText('6 格')).toBeInTheDocument();
+    expect(within(list).queryByText('横向铺开摊位')).not.toBeInTheDocument();
+    expect(within(list).queryByText('6 格')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Records')).not.toBeInTheDocument();
+    expect(within(list).queryByText('说明记录')).not.toBeInTheDocument();
+    expect(within(list).queryByText('暂无说明记录')).not.toBeInTheDocument();
 
     await userEvent.click(within(list).getByRole('button', { name: /市集区/ }));
 
@@ -133,28 +278,19 @@ describe('Island Designer scaffold persistence', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent('横向铺开摊位');
   });
 
-  it('keeps delete separate from locate and supports cancel then confirm', async () => {
+  it('keeps the records panel hidden until there are regions and only renders titles', async () => {
     render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={memoryStorage()} />);
 
+    await screen.findByRole('group', { name: '主工具栏' });
+    expect(screen.queryByLabelText('说明记录列表')).not.toBeInTheDocument();
+
     await createRegionFromCells('住宅区', '不要被删除按钮触发定位', 'map-cell-4-4');
-    const cell = screen.getByTestId('map-cell-4-4');
     const list = screen.getByLabelText('说明记录列表');
 
-    await userEvent.click(within(list).getByRole('button', { name: '删除' }));
-
-    expect(within(list).getByText('确认删除？')).toBeInTheDocument();
-    expect(cell).not.toHaveClass('flash');
-
-    await userEvent.click(within(list).getByRole('button', { name: '取消' }));
-    expect(within(list).getByText('住宅区')).toBeInTheDocument();
-    expect(cell).toHaveAttribute('data-region-id', 'region-1');
-
-    await userEvent.click(within(list).getByRole('button', { name: '删除' }));
-    await userEvent.click(within(list).getByRole('button', { name: '确认删除' }));
-
-    expect(within(list).queryByText('住宅区')).not.toBeInTheDocument();
-    expect(within(list).getByText('暂无说明记录')).toBeInTheDocument();
-    expect(cell).not.toHaveAttribute('data-region-id');
+    expect(within(list).getByRole('button', { name: '住宅区' })).toBeInTheDocument();
+    expect(within(list).queryByText('不要被删除按钮触发定位')).not.toBeInTheDocument();
+    expect(within(list).queryByText('1 格')).not.toBeInTheDocument();
+    expect(within(list).queryByText('删除')).not.toBeInTheDocument();
   });
 
   it('shows tooltip content when a saved region cell receives keyboard focus', async () => {
@@ -176,9 +312,9 @@ describe('Island Designer scaffold persistence', () => {
 
     render(<App config={config} fetcher={fetcher} storage={memoryStorage()} />);
 
-    expect(await screen.findByText(/已登录：保存到 Pokokit Cloud/)).toBeInTheDocument();
-    expect(screen.getByText('owner-1')).toBeInTheDocument();
-    expect(screen.getByText('已保存到 Pokokit Cloud')).toBeInTheDocument();
+    const toolbar = await screen.findByRole('group', { name: '主工具栏' });
+    expect(within(toolbar).getByRole('button', { name: 'owner-1' })).toBeInTheDocument();
+    expect(within(toolbar).getByRole('button', { name: '文件' })).toHaveAttribute('title', '已保存到 Pokokit Cloud');
     expect(fetcher).toHaveBeenCalledWith('https://api.test/api/v1/auth/session', expect.objectContaining({ credentials: 'include' }));
     expect(fetcher).toHaveBeenCalledWith('https://api.test/api/v1/islands', expect.objectContaining({ credentials: 'include' }));
   });
@@ -191,11 +327,8 @@ describe('Island Designer scaffold persistence', () => {
     ]);
     render(<App config={config} fetcher={fetcher} storage={memoryStorage()} />);
 
-    await screen.findByText('云端待保存');
-    await userEvent.click(screen.getByRole('button', { name: '保存当前规划' }));
-
-    expect(await screen.findByText('已保存到 Pokokit Cloud')).toBeInTheDocument();
-    expect(fetcher).toHaveBeenLastCalledWith('https://api.test/api/v1/islands', expect.objectContaining({ method: 'POST', credentials: 'include' }));
+    await screen.findByRole('group', { name: '主工具栏' });
+    await waitFor(() => expect(fetcher).toHaveBeenLastCalledWith('https://api.test/api/v1/islands', expect.objectContaining({ method: 'POST', credentials: 'include' })));
   });
 
   it('shows recoverable cloud save errors', async () => {
@@ -206,11 +339,8 @@ describe('Island Designer scaffold persistence', () => {
     ]);
     render(<App config={config} fetcher={fetcher} storage={memoryStorage()} />);
 
-    await screen.findByText('云端待保存');
-    await userEvent.click(screen.getByRole('button', { name: '保存当前规划' }));
-
-    expect(await screen.findByText('Please sign in again.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '重试保存' })).toBeInTheDocument();
+    await screen.findByRole('group', { name: '主工具栏' });
+    await waitFor(() => expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('title', '保存失败'));
   });
 
   it('requires an explicit choice before uploading a local draft after login', async () => {
@@ -221,8 +351,8 @@ describe('Island Designer scaffold persistence', () => {
     render(<App config={config} fetcher={fetcher} storage={storage} />);
 
     expect(await screen.findByText('发现本地匿名草稿')).toBeInTheDocument();
-    expect(screen.getByText('已登录：当前继续本地保存，草稿不会自动同步到云端')).toBeInTheDocument();
-    expect(screen.queryByText('已登录：保存到 Pokokit Cloud')).not.toBeInTheDocument();
+    const toolbar = screen.getByRole('group', { name: '主工具栏' });
+    expect(within(toolbar).getByRole('button', { name: 'owner-1' })).toHaveAttribute('title', '当前继续本地保存');
     expect(screen.getByRole('button', { name: '保存到云端' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '继续本地' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '丢弃本地草稿' })).toBeInTheDocument();
@@ -231,7 +361,7 @@ describe('Island Designer scaffold persistence', () => {
     await userEvent.click(screen.getByRole('button', { name: '继续本地' }));
 
     expect(screen.queryByText('发现本地匿名草稿')).not.toBeInTheDocument();
-    expect(screen.getByText('本地待保存')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('title', '本地待保存');
   });
 });
 
@@ -274,7 +404,7 @@ function throwingStorage(): StorageLike {
 }
 
 async function createRegionFromCells(label: string, note: string, startTestId: string, endTestId?: string) {
-  await screen.findByText(/未登录：仅保存在此浏览器 localStorage/);
+  await screen.findByRole('group', { name: '主工具栏' });
   const start = screen.getByTestId(startTestId);
   fireEvent.pointerDown(start);
   if (endTestId) {

@@ -1,3 +1,5 @@
+import { referenceIslandGrid, referenceIslandMacroGrid, referenceIslandSubdivisions } from './island-terrain';
+
 export interface IslandCell {
   x: number;
   y: number;
@@ -61,8 +63,8 @@ export function createDefaultIslandDocument(now = new Date().toISOString()): Isl
         name: '第一张岛屿地图',
         order: 0,
         grid: {
-          width: 48,
-          height: 32,
+          width: referenceIslandGrid.width,
+          height: referenceIslandGrid.height,
         },
         regions: [],
       },
@@ -73,6 +75,41 @@ export function createDefaultIslandDocument(now = new Date().toISOString()): Isl
 
 export function getActiveMap(document: IslandDocumentV1): IslandMap {
   return document.maps.find(map => map.id === document.activeMapId) ?? document.maps[0] ?? createDefaultIslandDocument().maps[0]!;
+}
+
+export function normalizeIslandDocumentGrid(document: IslandDocumentV1, now = new Date().toISOString()): IslandDocumentV1 {
+  let changed = false;
+  const maps = document.maps.map(map => {
+    const nextRegions: IslandRegion[] = [];
+    const isCurrentGrid = map.grid.width === referenceIslandGrid.width && map.grid.height === referenceIslandGrid.height;
+    for (const region of map.regions) {
+      const cells = isCurrentGrid
+        ? uniqueInBoundsCells(region.cells, referenceIslandGrid)
+        : expandMacroCellsToSubcells(region.cells);
+      if (cells.length !== region.cells.length || !sameCells(cells, region.cells)) {
+        changed = true;
+      }
+      if (cells.length > 0) {
+        nextRegions.push(sameCells(cells, region.cells) ? region : { ...region, cells });
+      }
+    }
+    if (nextRegions.length !== map.regions.length) {
+      changed = true;
+    }
+    if (map.grid.width !== referenceIslandGrid.width || map.grid.height !== referenceIslandGrid.height) {
+      changed = true;
+    }
+    return {
+      ...map,
+      grid: {
+        width: referenceIslandGrid.width,
+        height: referenceIslandGrid.height,
+      },
+      regions: nextRegions,
+    };
+  });
+
+  return changed ? { ...document, maps, updatedAt: now } : document;
 }
 
 export function createIslandRegion(document: IslandDocumentV1, input: CreateIslandRegionInput): CreateIslandRegionResult {
@@ -208,4 +245,31 @@ function uniqueInBoundsCells(cells: IslandCell[], grid: IslandMap['grid']): Isla
     result.push({ x: cell.x, y: cell.y });
   }
   return result;
+}
+
+function expandMacroCellsToSubcells(cells: IslandCell[]): IslandCell[] {
+  const seen = new Set<string>();
+  const result: IslandCell[] = [];
+  for (const cell of cells) {
+    if (!Number.isInteger(cell.x) || !Number.isInteger(cell.y) || cell.x < 0 || cell.y < 0 || cell.x >= referenceIslandMacroGrid.width || cell.y >= referenceIslandMacroGrid.height) {
+      continue;
+    }
+    const baseX = cell.x * referenceIslandSubdivisions;
+    const baseY = cell.y * referenceIslandSubdivisions;
+    for (let y = 0; y < referenceIslandSubdivisions; y += 1) {
+      for (let x = 0; x < referenceIslandSubdivisions; x += 1) {
+        const subcell = { x: baseX + x, y: baseY + y };
+        const key = `${subcell.x}:${subcell.y}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          result.push(subcell);
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function sameCells(left: IslandCell[], right: IslandCell[]): boolean {
+  return left.length === right.length && left.every((cell, index) => cell.x === right[index]?.x && cell.y === right[index]?.y);
 }

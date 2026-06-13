@@ -5,10 +5,50 @@ import {
   createIslandRegion,
   islandRegionPalette,
   nextIslandRegionId,
+  normalizeIslandDocumentGrid,
   removeIslandRegion,
 } from './island-document';
+import { referenceIslandGrid, referenceIslandSubdivisions } from './island-terrain';
 
 describe('island document region creation', () => {
+  it('creates the default reference island grid', () => {
+    const document = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
+
+    expect(document.maps[0]?.grid).toEqual(referenceIslandGrid);
+  });
+
+  it('normalizes legacy grid documents to the reference island grid', () => {
+    const document = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
+    const legacyDocument = {
+      ...document,
+      maps: [
+        {
+          ...document.maps[0]!,
+          grid: { width: 48, height: 32 },
+          regions: [
+            {
+              id: 'region-1',
+              label: '旧区域',
+              note: '保留边界内格子',
+              color: islandRegionPalette[0],
+              cells: [{ x: 22, y: 22 }, { x: 23, y: 0 }, { x: 47, y: 31 }],
+              createdAt: '2026-06-13T00:00:00.000Z',
+              updatedAt: '2026-06-13T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
+    };
+
+    const normalized = normalizeIslandDocumentGrid(legacyDocument, '2026-06-13T01:00:00.000Z');
+
+    expect(normalized.updatedAt).toBe('2026-06-13T01:00:00.000Z');
+    expect(normalized.maps[0]?.grid).toEqual(referenceIslandGrid);
+    expect(normalized.maps[0]?.regions[0]?.cells).toHaveLength(referenceIslandSubdivisions * referenceIslandSubdivisions);
+    expect(normalized.maps[0]?.regions[0]?.cells[0]).toEqual({ x: 88, y: 88 });
+    expect(normalized.maps[0]?.regions[0]?.cells.at(-1)).toEqual({ x: 91, y: 91 });
+  });
+
   it('rejects empty region input', () => {
     const document = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
 
@@ -58,7 +98,7 @@ describe('island document region creation', () => {
       label: '  花园区  ',
       note: '  入口附近需要花园  ',
       color: islandRegionPalette[1],
-      cells: [{ x: 1, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 1 }, { x: 50, y: 1 }],
+      cells: [{ x: 1, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 1 }, { x: 500, y: 1 }],
       now: '2026-06-13T01:00:00.000Z',
     });
 
