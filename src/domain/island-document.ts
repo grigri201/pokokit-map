@@ -32,6 +32,20 @@ export interface IslandDocumentV1 {
 }
 
 export const localIslandStorageKey = 'pokokit.islandDesigner.document.v1';
+export const islandRegionPalette = ['#2f7dd1', '#d95f39', '#6f8f2f', '#8b5cc7', '#c58a14'] as const;
+
+export interface CreateIslandRegionInput {
+  id: string;
+  label: string;
+  note: string;
+  color: string;
+  cells: IslandCell[];
+  now?: string;
+}
+
+export type CreateIslandRegionResult =
+  | { ok: true; document: IslandDocumentV1; region: IslandRegion }
+  | { ok: false; message: string };
 
 export function createDefaultIslandDocument(now = new Date().toISOString()): IslandDocumentV1 {
   return {
@@ -55,6 +69,60 @@ export function createDefaultIslandDocument(now = new Date().toISOString()): Isl
 
 export function getActiveMap(document: IslandDocumentV1): IslandMap {
   return document.maps.find(map => map.id === document.activeMapId) ?? document.maps[0] ?? createDefaultIslandDocument().maps[0]!;
+}
+
+export function createIslandRegion(document: IslandDocumentV1, input: CreateIslandRegionInput): CreateIslandRegionResult {
+  const activeMap = getActiveMap(document);
+  const label = input.label.trim();
+  const note = input.note.trim();
+  const now = input.now ?? new Date().toISOString();
+
+  if (!label) {
+    return { ok: false, message: '请填写区域标题。' };
+  }
+  if (!note) {
+    return { ok: false, message: '请填写区域说明。' };
+  }
+  if (!isAllowedRegionColor(input.color)) {
+    return { ok: false, message: '请选择可用的区域颜色。' };
+  }
+
+  const cells = uniqueInBoundsCells(input.cells, activeMap.grid);
+  if (cells.length === 0) {
+    return { ok: false, message: '请先选择地图格子。' };
+  }
+
+  const region: IslandRegion = {
+    id: input.id,
+    label,
+    note,
+    color: input.color,
+    cells,
+    createdAt: now,
+    updatedAt: now,
+  };
+  return {
+    ok: true,
+    region,
+    document: {
+      ...document,
+      updatedAt: now,
+      maps: document.maps.map(map => (
+        map.id === activeMap.id
+          ? { ...map, regions: [...map.regions, region] }
+          : map
+      )),
+    },
+  };
+}
+
+export function nextIslandRegionId(regions: IslandRegion[], seed = 1): string {
+  const existing = new Set(regions.map(region => region.id));
+  let index = Math.max(1, Math.trunc(seed));
+  while (existing.has(`region-${index}`)) {
+    index += 1;
+  }
+  return `region-${index}`;
 }
 
 export function isIslandDocumentV1(value: unknown): value is IslandDocumentV1 {
@@ -93,4 +161,25 @@ function isIslandRegion(value: unknown): value is IslandRegion {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isAllowedRegionColor(color: string): boolean {
+  return islandRegionPalette.some(candidate => candidate === color);
+}
+
+function uniqueInBoundsCells(cells: IslandCell[], grid: IslandMap['grid']): IslandCell[] {
+  const seen = new Set<string>();
+  const result: IslandCell[] = [];
+  for (const cell of cells) {
+    if (!Number.isInteger(cell.x) || !Number.isInteger(cell.y) || cell.x < 0 || cell.y < 0 || cell.x >= grid.width || cell.y >= grid.height) {
+      continue;
+    }
+    const key = `${cell.x}:${cell.y}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push({ x: cell.x, y: cell.y });
+  }
+  return result;
 }

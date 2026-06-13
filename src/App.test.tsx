@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -43,15 +43,59 @@ describe('Island Designer scaffold persistence', () => {
     render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={throwingStorage()} />);
 
     expect(await screen.findByText(/无法访问本地保存/)).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: '第一张巨大岛屿地图骨架' })).toBeInTheDocument();
+    expect(screen.getByRole('grid', { name: '第一张巨大岛屿地图' })).toBeInTheDocument();
   });
 
   it('shows recoverable auth restore failures without blocking local editing', async () => {
     render(<App config={config} fetcher={mockFetch([{ error: { code: 'server_error', message: 'Internal provider failure' }, status: 500 }])} storage={memoryStorage()} />);
 
     expect(await screen.findByText('无法恢复云端登录状态，可继续本地编辑。')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: '第一张巨大岛屿地图骨架' })).toBeInTheDocument();
+    expect(screen.getByRole('grid', { name: '第一张巨大岛屿地图' })).toBeInTheDocument();
     expect(screen.getByText('本地待保存')).toBeInTheDocument();
+  });
+
+  it('creates a note region from a single selected cell and renders the overlay tooltip', async () => {
+    render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={memoryStorage()} />);
+
+    await screen.findByText(/未登录：仅保存在此浏览器 localStorage/);
+    const cell = screen.getByTestId('map-cell-2-3');
+    fireEvent.pointerDown(cell);
+    fireEvent.pointerUp(cell);
+
+    expect(screen.getByText('1 个格子已选择')).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('区域标题'), '入口花园');
+    await userEvent.type(screen.getByLabelText('说明文字'), '这里放欢迎区和花圃');
+    await userEvent.click(screen.getByRole('button', { name: '创建说明' }));
+
+    expect(cell).toHaveAttribute('data-region-id', 'region-1');
+    expect(screen.getByText('入口花园')).toBeInTheDocument();
+    expect(screen.getByText('这里放欢迎区和花圃')).toBeInTheDocument();
+    expect(screen.getByText('1 个格子')).toBeInTheDocument();
+    expect(screen.getByText('本地待保存')).toBeInTheDocument();
+  });
+
+  it('supports rectangular drag selection and saved region focus tooltip', async () => {
+    render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={memoryStorage()} />);
+
+    await screen.findByText(/未登录：仅保存在此浏览器 localStorage/);
+    const start = screen.getByTestId('map-cell-1-1');
+    const end = screen.getByTestId('map-cell-3-2');
+    fireEvent.pointerDown(start);
+    fireEvent.pointerEnter(end);
+    fireEvent.pointerUp(end);
+
+    expect(screen.getByText('6 个格子已选择')).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('区域标题'), '市集区');
+    await userEvent.type(screen.getByLabelText('说明文字'), '横向铺开摊位');
+    await userEvent.click(screen.getByRole('button', { name: '创建说明' }));
+
+    expect(start).toHaveAttribute('data-region-id', 'region-1');
+    expect(end).toHaveAttribute('data-region-id', 'region-1');
+    fireEvent.focus(end);
+
+    expect(screen.getByRole('tooltip')).toHaveTextContent('市集区');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('横向铺开摊位');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('6 个格子');
   });
 
   it('restores a domain session and loads the first cloud island', async () => {

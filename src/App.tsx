@@ -1,7 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { restoreDomainSession, type DomainSessionUser } from './auth/domain-session';
-import { createDefaultIslandDocument, getActiveMap, type IslandDocumentV1 } from './domain/island-document';
+import {
+  createDefaultIslandDocument,
+  createIslandRegion,
+  getActiveMap,
+  islandRegionPalette,
+  nextIslandRegionId,
+  type IslandCell,
+  type IslandDocumentV1,
+  type IslandRegion,
+} from './domain/island-document';
+import {
+  beginSelectionDrag,
+  cellKey,
+  clearSelection,
+  endSelectionDrag,
+  updateSelectionDrag,
+} from './domain/selection';
 import { readAppConfig, type AppConfig } from './config';
 import { IslandApiClient, IslandApiError, type IslandRecord } from './persistence/island-api-client';
 import {
@@ -20,6 +36,17 @@ type AuthState =
 type SaveState = 'idle' | 'pending' | 'saved' | 'error';
 type PersistenceMode = 'local' | 'cloud';
 
+interface RegionDraft {
+  label: string;
+  note: string;
+  color: string;
+}
+
+interface RegionTooltip {
+  region: IslandRegion;
+  cellCount: number;
+}
+
 interface AppProps {
   config?: AppConfig;
   fetcher?: typeof fetch;
@@ -34,6 +61,11 @@ export function App({ config = readAppConfig(), fetcher = fetch, storage = windo
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [migrationDraft, setMigrationDraft] = useState<IslandDocumentV1 | null>(null);
+  const [selection, setSelection] = useState(clearSelection);
+  const [regionDraft, setRegionDraft] = useState<RegionDraft>({ label: '', note: '', color: islandRegionPalette[0] });
+  const [regionError, setRegionError] = useState<string | null>(null);
+  const [activeTooltip, setActiveTooltip] = useState<RegionTooltip | null>(null);
+  const [regionSequence, setRegionSequence] = useState(1);
 
   const apiClient = useMemo(() => new IslandApiClient({ apiBaseUrl: config.apiBaseUrl, fetcher }), [config.apiBaseUrl, fetcher]);
 
@@ -163,6 +195,25 @@ export function App({ config = readAppConfig(), fetcher = fetch, storage = windo
   }, [auth.status, loadCloudIsland, storage]);
 
   const activeMap = getActiveMap(document);
+  const gridCells = useMemo(() => {
+    const cells: IslandCell[] = [];
+    for (let y = 0; y < activeMap.grid.height; y += 1) {
+      for (let x = 0; x < activeMap.grid.width; x += 1) {
+        cells.push({ x, y });
+      }
+    }
+    return cells;
+  }, [activeMap.grid.height, activeMap.grid.width]);
+  const selectedCellKeys = useMemo(() => new Set(selection.cells.map(cellKey)), [selection.cells]);
+  const regionByCell = useMemo(() => {
+    const map = new Map<string, IslandRegion>();
+    for (const region of activeMap.regions) {
+      for (const cell of region.cells) {
+        map.set(cellKey(cell), region);
+      }
+    }
+    return map;
+  }, [activeMap.regions]);
   const isCloud = mode === 'cloud' && auth.status === 'authenticated';
   const isAuthenticatedLocal = mode === 'local' && auth.status === 'authenticated';
   const statusLabel = saveState === 'pending'
@@ -172,6 +223,57 @@ export function App({ config = readAppConfig(), fetcher = fetch, storage = windo
       : saveState === 'error'
         ? '保存失败'
         : isCloud ? '云端待保存' : '本地待保存';
+  const canCreateRegion = selection.cells.length > 0 && regionDraft.label.trim().length > 0 && regionDraft.note.trim().length > 0;
+  const mapStyle = { '--grid-width': activeMap.grid.width } as CSSProperties;
+
+  const handleCellPointerDown = useCallback((cell: IslandCell) => {
+    setActiveTooltip(null);
+    setRegionError(null);
+    setSelection(beginSelectionDrag(cell, activeMap.grid));
+  }, [activeMap.grid]);
+
+  const handleCellPointerEnter = useCallback((cell: IslandCell) => {
+    setSelection(current => (
+      current.dragging
+        ? updateSelectionDrag(current, cell, activeMap.grid)
+        : current
+    ));
+  }, [activeMap.grid]);
+
+  const handleCellPointerUp = useCallback((cell: IslandCell) => {
+    setSelection(current => endSelectionDrag(current, cell, activeMap.grid));
+  }, [activeMap.grid]);
+
+  const showRegionTooltip = useCallback((region: IslandRegion | undefined) => {
+    if (region) {
+      setActiveTooltip({ region, cellCount: region.cells.length });
+    }
+  }, []);
+
+  const createRegion = useCallback((event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const regionId = nextIslandRegionId(activeMap.regions, regionSequence);
+    const result = createIslandRegion(document, {
+      id: regionId,
+      label: regionDraft.label,
+      note: regionDraft.note,
+      color: regionDraft.color,
+      cells: selection.cells,
+    });
+    if (!result.ok) {
+      setRegionError(result.message);
+      return;
+    }
+
+    setDocument(result.document);
+    setSelection(clearSelection());
+    setRegionDraft({ label: '', note: '', color: regionDraft.color });
+    setRegionError(null);
+    setActiveTooltip({ region: result.region, cellCount: result.region.cells.length });
+    setRegionSequence(current => current + 1);
+    setSaveState('idle');
+    setErrorMessage(null);
+  }, [activeMap.regions, document, regionDraft.color, regionDraft.label, regionDraft.note, regionSequence, selection.cells]);
 
   return (
     <main className="workspace">
@@ -220,6 +322,47 @@ export function App({ config = readAppConfig(), fetcher = fetch, storage = windo
         {saveState === 'error' ? (
           <button className="secondary-action" type="button" onClick={() => void saveNow()}>重试保存</button>
         ) : null}
+
+        <section className="region-panel" aria-label="创建区域说明">
+          <div>
+            <p className="eyebrow">Region</p>
+            <strong>{selection.cells.length > 0 ? `${selection.cells.length} 个格子已选择` : '未选择格子'}</strong>
+          </div>
+          <form onSubmit={createRegion}>
+            <label>
+              区域标题
+              <input
+                value={regionDraft.label}
+                onChange={event => setRegionDraft(current => ({ ...current, label: event.target.value }))}
+                placeholder="例如：入口花园"
+              />
+            </label>
+            <label>
+              说明文字
+              <textarea
+                value={regionDraft.note}
+                onChange={event => setRegionDraft(current => ({ ...current, note: event.target.value }))}
+                placeholder="记录规划意图"
+                rows={3}
+              />
+            </label>
+            <div className="swatch-group" role="group" aria-label="区域颜色">
+              {islandRegionPalette.map(color => (
+                <button
+                  key={color}
+                  type="button"
+                  className={color === regionDraft.color ? 'swatch selected' : 'swatch'}
+                  style={{ '--swatch-color': color } as CSSProperties}
+                  aria-label={`选择颜色 ${color}`}
+                  aria-pressed={color === regionDraft.color}
+                  onClick={() => setRegionDraft(current => ({ ...current, color }))}
+                />
+              ))}
+            </div>
+            {regionError ? <p className="safe-error compact">{regionError}</p> : null}
+            <button className="secondary-action" type="submit" disabled={!canCreateRegion}>创建说明</button>
+          </form>
+        </section>
       </aside>
 
       <section className="map-workbench" aria-label="第一张岛屿地图">
@@ -237,13 +380,52 @@ export function App({ config = readAppConfig(), fetcher = fetch, storage = windo
               <dt>Regions</dt>
               <dd>{activeMap.regions.length}</dd>
             </div>
+            <div>
+              <dt>Selected</dt>
+              <dd>{selection.cells.length}</dd>
+            </div>
           </dl>
         </div>
-        <div className="map-surface" role="img" aria-label="第一张巨大岛屿地图骨架">
-          {Array.from({ length: 96 }, (_value, index) => (
-            <span key={index} className="map-cell" />
-          ))}
+        <div className="map-scroll">
+          <div className="map-surface" role="grid" aria-label="第一张巨大岛屿地图" style={mapStyle}>
+            {gridCells.map(cell => {
+              const key = cellKey(cell);
+              const region = regionByCell.get(key);
+              const selected = selectedCellKeys.has(key);
+              const className = [
+                'map-cell',
+                selected ? 'selected' : '',
+                region ? 'saved' : '',
+              ].filter(Boolean).join(' ');
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="gridcell"
+                  className={className}
+                  style={region ? { '--region-color': region.color } as CSSProperties : undefined}
+                  data-testid={`map-cell-${cell.x}-${cell.y}`}
+                  data-region-id={region?.id}
+                  aria-label={region ? `格子 ${cell.x + 1},${cell.y + 1}：${region.label}` : `格子 ${cell.x + 1},${cell.y + 1}`}
+                  aria-selected={selected}
+                  onPointerDown={() => handleCellPointerDown(cell)}
+                  onPointerEnter={() => handleCellPointerEnter(cell)}
+                  onPointerUp={() => handleCellPointerUp(cell)}
+                  onMouseEnter={() => showRegionTooltip(region)}
+                  onFocus={() => showRegionTooltip(region)}
+                  onClick={() => showRegionTooltip(region)}
+                />
+              );
+            })}
+          </div>
         </div>
+        {activeTooltip ? (
+          <aside className="map-tooltip" role="tooltip">
+            <strong>{activeTooltip.region.label}</strong>
+            <span>{activeTooltip.region.note}</span>
+            <small>{activeTooltip.cellCount} 个格子</small>
+          </aside>
+        ) : null}
       </section>
     </main>
   );

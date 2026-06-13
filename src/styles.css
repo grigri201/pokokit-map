@@ -16,7 +16,9 @@ body {
 }
 
 button,
-a {
+a,
+input,
+textarea {
   font: inherit;
 }
 
@@ -63,7 +65,8 @@ h2 {
 }
 
 .status-card,
-.migration-panel {
+.migration-panel,
+.region-panel {
   display: grid;
   gap: 10px;
   border: 1px solid #cfd8cf;
@@ -119,6 +122,49 @@ h2 {
   color: #56645b;
 }
 
+.region-panel form {
+  display: grid;
+  gap: 10px;
+}
+
+.region-panel label {
+  display: grid;
+  gap: 5px;
+  color: #334139;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.region-panel input,
+.region-panel textarea {
+  width: 100%;
+  border: 1px solid #c6d0c7;
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: #fbfcf6;
+  color: #17211d;
+  resize: vertical;
+}
+
+.swatch-group {
+  display: flex;
+  gap: 8px;
+}
+
+.swatch {
+  width: 28px;
+  height: 28px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--swatch-color);
+  cursor: pointer;
+}
+
+.swatch.selected {
+  border-color: #17211d;
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px rgba(23, 33, 29, 0.2);
+}
+
 .migration-panel button,
 .primary-action,
 .secondary-action {
@@ -141,16 +187,28 @@ h2 {
   color: #1f5f4a;
 }
 
+.secondary-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .primary-action:disabled {
   cursor: progress;
   opacity: 0.65;
 }
 
+.safe-error.compact {
+  margin: 0;
+  padding: 9px 10px;
+  font-size: 13px;
+}
+
 .map-workbench {
   display: grid;
-  grid-template-rows: auto minmax(420px, 1fr);
+  grid-template-rows: auto minmax(420px, 1fr) auto;
   gap: 20px;
   padding: 28px;
+  overflow: hidden;
 }
 
 .map-toolbar {
@@ -182,12 +240,9 @@ h2 {
   font-weight: 800;
 }
 
-.map-surface {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(20px, 1fr));
-  grid-auto-rows: minmax(20px, 1fr);
-  gap: 3px;
-  overflow: hidden;
+.map-scroll {
+  min-height: 0;
+  overflow: auto;
   border: 1px solid #b8c7bc;
   border-radius: 8px;
   background: #d5e5da;
@@ -195,11 +250,67 @@ h2 {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7);
 }
 
+.map-surface {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-width), 28px);
+  grid-auto-rows: 28px;
+  gap: 3px;
+  width: max-content;
+  min-width: 100%;
+}
+
 .map-cell {
-  min-height: 28px;
   border: 1px solid rgba(80, 107, 92, 0.28);
   border-radius: 4px;
   background: linear-gradient(135deg, #f8fbec, #dbeecf);
+  cursor: cell;
+  padding: 0;
+  touch-action: none;
+}
+
+.map-cell:hover,
+.map-cell:focus-visible {
+  outline: 2px solid #17211d;
+  outline-offset: -2px;
+}
+
+.map-cell.selected {
+  border-color: #111a16;
+  background: #f8d05a;
+  box-shadow: inset 0 0 0 2px rgba(17, 26, 22, 0.35);
+}
+
+.map-cell.saved {
+  border-color: color-mix(in srgb, var(--region-color) 75%, #17211d);
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.22)),
+    var(--region-color);
+}
+
+.map-cell.saved.selected {
+  background:
+    linear-gradient(rgba(248, 208, 90, 0.72), rgba(248, 208, 90, 0.72)),
+    var(--region-color);
+}
+
+.map-tooltip {
+  display: grid;
+  gap: 4px;
+  width: min(520px, 100%);
+  border-left: 4px solid #2f7dd1;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px 14px;
+  box-shadow: 0 6px 18px rgba(23, 33, 29, 0.08);
+}
+
+.map-tooltip span {
+  color: #334139;
+}
+
+.map-tooltip small {
+  color: #617067;
+  font-weight: 700;
 }
 
 @media (max-width: 760px) {
