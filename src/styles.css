@@ -52,6 +52,14 @@ textarea {
   z-index: 30;
 }
 
+.app-error-panel {
+  position: absolute;
+  top: 54px;
+  right: 14px;
+  z-index: 29;
+  width: min(320px, calc(100vw - 28px));
+}
+
 .app-tool-button {
   min-height: 34px;
   border: 1px solid transparent;

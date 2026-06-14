@@ -199,9 +199,16 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
   const lastSavedDocumentRef = useRef<IslandDocumentV1 | null>(null);
   const cloudRecordRef = useRef<CloudMapRecord | null>(null);
 
-  const apiClient = useMemo(() => new IslandApiClient({ apiBaseUrl: config.apiBaseUrl, fetcher }), [config.apiBaseUrl, fetcher]);
   const defaultAuthClient = useMemo(() => createIslandAuthClient(config), [config.supabasePublishableKey, config.supabaseUrl]);
   const authClient = providedAuthClient === undefined ? defaultAuthClient : providedAuthClient;
+  const getAuthAccessToken = useCallback(async () => {
+    const session = await authClient?.getSession();
+    return session?.access_token ?? null;
+  }, [authClient]);
+  const apiClient = useMemo(
+    () => new IslandApiClient({ apiBaseUrl: config.apiBaseUrl, fetcher, getAccessToken: getAuthAccessToken }),
+    [config.apiBaseUrl, fetcher, getAuthAccessToken],
+  );
 
   useEffect(() => {
     cloudRecordRef.current = cloudRecord;
@@ -1275,6 +1282,12 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
           ) : null}
         </div>
       </div>
+
+      {errorMessage ? (
+        <div className="floating-panel app-error-panel safe-error compact" role="alert">
+          {errorMessage}
+        </div>
+      ) : null}
 
       {cloudConflictDocument ? (
         <section className="floating-panel migration-panel migration-popover" aria-label="云端存档冲突">

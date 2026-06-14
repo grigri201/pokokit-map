@@ -896,6 +896,39 @@ describe('Island Designer scaffold persistence', () => {
     expect(within(toolbar).getByRole('button', { name: '文件' })).toHaveAttribute('title', '已保存到 Pokokit Cloud');
   });
 
+  it('uses the Supabase access token for cloud map saves when the browser has a Supabase session', async () => {
+    const authClient = mockAuthClient({
+      getSession: vi.fn(async () => createSupabaseSession()),
+    });
+    const fetcher = mockFetch([
+      { data: { user: { id: 'owner-1', nickname: 'Owner' } } },
+      { error: { code: 'map_not_found', message: 'Map was not found.' }, status: 404 },
+      { data: cloudMapData(createDefaultIslandDocument()) },
+    ]);
+
+    render(<App config={config} fetcher={fetcher} storage={memoryStorage()} authClient={authClient} />);
+
+    const toolbar = await screen.findByRole('group', { name: '主工具栏' });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+
+    await userEvent.click(within(toolbar).getByRole('button', { name: '文件' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: '保存' }));
+
+    await waitFor(() => {
+      const putCall = fetcher.mock.calls.find(([url, init]) => (
+        url === 'https://api.test/api/v1/maps/cloud-island' &&
+        init?.method === 'PUT'
+      ));
+      expect(putCall?.[1]).toMatchObject({
+        credentials: 'omit',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer access-token',
+        }),
+      });
+    });
+    expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('title', '已保存到 Pokokit Cloud');
+  });
+
   it('shows recoverable cloud save errors', async () => {
     const fetcher = mockFetch([
       { data: { user: { id: 'owner-1' } } },
@@ -909,6 +942,7 @@ describe('Island Designer scaffold persistence', () => {
     await userEvent.click(screen.getByRole('menuitem', { name: '保存' }));
 
     await waitFor(() => expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('title', '保存失败'));
+    expect(screen.getByRole('alert')).toHaveTextContent('Please sign in again.');
   });
 
   it('keeps local-only data local until a logged-in user clicks Save', async () => {

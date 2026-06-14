@@ -22,6 +22,7 @@ export interface CloudMapRecord {
 export interface IslandApiClientOptions {
   apiBaseUrl: string;
   fetcher?: typeof fetch;
+  getAccessToken?: () => Promise<string | null>;
 }
 
 export class IslandApiError extends Error {
@@ -38,10 +39,12 @@ export class IslandApiError extends Error {
 export class IslandApiClient {
   private readonly apiBaseUrl: string;
   private readonly fetcher: typeof fetch;
+  private readonly getAccessToken: (() => Promise<string | null>) | undefined;
 
   constructor(options: IslandApiClientOptions) {
     this.apiBaseUrl = options.apiBaseUrl.replace(/\/$/, '');
     this.fetcher = options.fetcher ?? fetch;
+    this.getAccessToken = options.getAccessToken;
   }
 
   async listIslands(): Promise<IslandRecord[]> {
@@ -103,11 +106,13 @@ export class IslandApiClient {
   }
 
   private async request(path: string, init: RequestInit): Promise<Response> {
+    const accessToken = await this.readAccessToken();
     const response = await this.fetcher(`${this.apiBaseUrl}${path}`, {
       ...init,
-      credentials: 'include',
+      credentials: accessToken ? 'omit' : 'include',
       headers: {
         'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...(init.headers ?? {}),
       },
     });
@@ -116,6 +121,18 @@ export class IslandApiClient {
       throw new IslandApiError(error.code, error.message, response.status);
     }
     return response;
+  }
+
+  private async readAccessToken(): Promise<string | null> {
+    if (!this.getAccessToken) {
+      return null;
+    }
+    try {
+      const token = await this.getAccessToken();
+      return token?.trim() || null;
+    } catch {
+      return null;
+    }
   }
 }
 
