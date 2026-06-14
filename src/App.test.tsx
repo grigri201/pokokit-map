@@ -742,6 +742,19 @@ describe('Island Designer scaffold persistence', () => {
     expect(screen.getByLabelText('入口花园 注释')).toHaveTextContent('初始注释');
   });
 
+  it('renders a saved URL title as a new-tab link in the detail popover', async () => {
+    render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={memoryStorage()} />);
+
+    await createRegionFromCells('https://map.pokokit.com/guide', 'map-cell-2-3');
+    fireEvent.click(screen.getByTestId('map-cell-2-3'));
+
+    const detail = screen.getByLabelText('https://map.pokokit.com/guide 注释');
+    const link = within(detail).getByRole('link', { name: 'https://map.pokokit.com/guide' });
+    expect(link).toHaveAttribute('href', 'https://map.pokokit.com/guide');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noreferrer');
+  });
+
   it('edits a saved region by adding more selected cells from the detail popover', async () => {
     const storage = memoryStorage();
     render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={storage} />);

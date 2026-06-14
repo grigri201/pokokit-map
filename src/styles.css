@@ -661,6 +661,13 @@ h2 {
   line-height: 1.2;
 }
 
+.region-detail-popover > strong a {
+  color: #0f6b4f;
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .region-note-list {
   display: grid;
   gap: 6px;

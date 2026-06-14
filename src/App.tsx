@@ -482,6 +482,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
   const selectionAnchor = selectionBounds ? readFloatingAnchorFromBounds(selectionBounds, mapView) : null;
   const activeRegionDetail = activeRegionDetailId ? activeMap.regions.find(region => region.id === activeRegionDetailId) ?? null : null;
   const activeRegionDetailAnchor = activeRegionDetail ? readFloatingAnchorFromCells(activeRegionDetail.cells, mapView) : null;
+  const activeRegionDetailUrl = activeRegionDetail ? readSafeHttpUrl(activeRegionDetail.label) : null;
   const zoomPercent = ((mapView.zoom - minMapZoom) / (maxMapZoom - minMapZoom)) * 100;
   const mediumGridZoomPercent = ((mediumGridZoom - minMapZoom) / (maxMapZoom - minMapZoom)) * 100;
   const fineGridZoomPercent = ((fineGridZoom - minMapZoom) / (maxMapZoom - minMapZoom)) * 100;
@@ -1342,7 +1343,13 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
             '--region-color': activeRegionDetail.color,
           } as CSSProperties}
         >
-          <strong>{activeRegionDetail.label}</strong>
+          <strong>
+            {activeRegionDetailUrl ? (
+              <a href={activeRegionDetailUrl} target="_blank" rel="noreferrer">
+                {activeRegionDetail.label}
+              </a>
+            ) : activeRegionDetail.label}
+          </strong>
           {activeRegionDetail.notes.length > 0 ? (
             <ul className="region-note-list">
               {activeRegionDetail.notes.map(note => (
@@ -1622,6 +1629,15 @@ function readSelectionBounds(cells: IslandCell[]): SelectionBounds | null {
 
 function formatSelectionSize(bounds: SelectionBounds): string {
   return `${bounds.width}×${bounds.height}`;
+}
+
+function readSafeHttpUrl(value: string): string | null {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function readRegionBadgeAnchor(cells: IslandCell[], mapView: MapView): FloatingAnchor {
