@@ -1,6 +1,7 @@
 export interface DomainSessionUser {
   id: string;
   email?: string;
+  nickname?: string;
 }
 
 export type DomainSessionResult =
@@ -73,6 +74,9 @@ function readUser(value: unknown): DomainSessionUser | null {
   const result: DomainSessionUser = { id: user.id };
   if (typeof user.email === 'string') {
     result.email = user.email;
+  }
+  if (typeof user.nickname === 'string' && user.nickname.trim().length > 0) {
+    result.nickname = user.nickname.trim();
   }
   return result;
 }

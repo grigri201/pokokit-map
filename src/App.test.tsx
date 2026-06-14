@@ -80,7 +80,7 @@ describe('Island Designer scaffold persistence', () => {
     });
     const fetcher = mockFetch([
       { data: { user: null } },
-      { data: { user: { id: 'owner-1', email: 'owner@example.com' } } },
+      { data: { user: { id: 'owner-1', email: 'owner@example.com', nickname: 'Owner' } } },
     ]);
 
     render(<App config={config} fetcher={fetcher} storage={memoryStorage()} authClient={authClient} />);
@@ -104,6 +104,7 @@ describe('Island Designer scaffold persistence', () => {
       );
     });
     expect(screen.getByText('发现本地匿名草稿')).toBeInTheDocument();
+    expect(within(toolbar).getByRole('button', { name: 'Owner' })).toBeInTheDocument();
   });
 
   it('keeps local editing when Supabase login cannot sync a Pokokit domain session', async () => {
@@ -862,13 +863,13 @@ describe('Island Designer scaffold persistence', () => {
   it('requires an explicit choice before uploading a local draft after login', async () => {
     const storage = memoryStorage();
     storage.setItem(localIslandStorageKey, JSON.stringify(createDefaultIslandDocument()));
-    const fetcher = mockFetch([{ data: { user: { id: 'owner-1' } } }]);
+    const fetcher = mockFetch([{ data: { user: { id: 'owner-1', nickname: 'Owner' } } }]);
 
     render(<App config={config} fetcher={fetcher} storage={storage} />);
 
     expect(await screen.findByText('发现本地匿名草稿')).toBeInTheDocument();
     const toolbar = screen.getByRole('group', { name: '主工具栏' });
-    expect(within(toolbar).getByRole('button', { name: 'owner-1' })).toHaveAttribute('title', '当前继续本地保存');
+    expect(within(toolbar).getByRole('button', { name: 'Owner' })).toHaveAttribute('title', '当前继续本地保存');
     expect(screen.getByRole('button', { name: '保存到云端' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '继续本地' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '丢弃本地草稿' })).toBeInTheDocument();

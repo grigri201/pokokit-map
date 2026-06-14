@@ -470,7 +470,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
       : saveState === 'error'
         ? '保存失败'
         : isCloud ? '云端待保存' : '本地待保存';
-  const accountLabel = auth.status === 'authenticated' ? auth.user.email ?? auth.user.id : '登录';
+  const accountLabel = auth.status === 'authenticated' ? auth.user.nickname ?? auth.user.email ?? auth.user.id : '登录';
   const canSaveRegionDraft = selection.cells.length > 0 && regionDraft.label.trim().length > 0;
   const focusMapTitleInput = useCallback(() => {
     mapTitleInputRef.current?.focus();
