@@ -188,8 +188,9 @@ textarea {
 
 .migration-popover {
   position: absolute;
-  top: 62px;
-  left: 14px;
+  top: 132px;
+  right: 14px;
+  left: auto;
   z-index: 11;
   width: 280px;
 }
