@@ -158,7 +158,7 @@ const mediumGridZoom = 1.15;
 const fineGridZoom = 4;
 const mediumDetailBlockSize = 4;
 
-export function App({ config = readAppConfig(), fetcher = fetch, locale = readBrowserLocale(), storage = window.localStorage, authClient: providedAuthClient }: AppProps) {
+export function App({ config = readAppConfig(), fetcher: providedFetcher, locale = readBrowserLocale(), storage = window.localStorage, authClient: providedAuthClient }: AppProps) {
   const [auth, setAuth] = useState<AuthState>({ status: 'checking' });
   const [document, setDocument] = useState<IslandDocumentV1>(() => createDefaultIslandDocument());
   const [cloudRecord, setCloudRecord] = useState<CloudMapRecord | null>(null);
@@ -199,6 +199,10 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
   const lastSavedDocumentRef = useRef<IslandDocumentV1 | null>(null);
   const cloudRecordRef = useRef<CloudMapRecord | null>(null);
 
+  const fetcher = useMemo<typeof fetch>(
+    () => providedFetcher ?? ((input, init) => fetch(input, init)),
+    [providedFetcher],
+  );
   const defaultAuthClient = useMemo(() => createIslandAuthClient(config), [config.supabasePublishableKey, config.supabaseUrl]);
   const authClient = providedAuthClient === undefined ? defaultAuthClient : providedAuthClient;
   const getAuthAccessToken = useCallback(async () => {

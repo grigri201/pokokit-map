@@ -107,7 +107,8 @@ export class IslandApiClient {
 
   private async request(path: string, init: RequestInit): Promise<Response> {
     const accessToken = await this.readAccessToken();
-    const response = await this.fetcher(`${this.apiBaseUrl}${path}`, {
+    const fetcher = this.fetcher;
+    const response = await fetcher(`${this.apiBaseUrl}${path}`, {
       ...init,
       credentials: accessToken ? 'omit' : 'include',
       headers: {
