@@ -1170,7 +1170,6 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
           {authMenuOpen ? (
             auth.status === 'authenticated' ? (
               <div className="floating-panel auth-popover account-popover" role="dialog" aria-label="账户菜单">
-                <strong>{accountLabel}</strong>
                 <button className="auth-submit-button" type="button" disabled={authPending} onClick={() => void signOut()}>
                   退出登录
                 </button>

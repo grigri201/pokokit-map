@@ -104,7 +104,12 @@ describe('Island Designer scaffold persistence', () => {
       );
     });
     expect(screen.getByText('发现本地匿名草稿')).toBeInTheDocument();
-    expect(within(toolbar).getByRole('button', { name: 'Owner' })).toBeInTheDocument();
+    const accountButton = within(toolbar).getByRole('button', { name: 'Owner' });
+    expect(accountButton).toBeInTheDocument();
+    await userEvent.click(accountButton);
+    const accountMenu = screen.getByRole('dialog', { name: '账户菜单' });
+    expect(within(accountMenu).queryByText('Owner')).not.toBeInTheDocument();
+    expect(within(accountMenu).getByRole('button', { name: '退出登录' })).toBeInTheDocument();
   });
 
   it('refreshes restored domain sessions that do not include a nickname', async () => {
