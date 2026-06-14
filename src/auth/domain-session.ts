@@ -26,6 +26,42 @@ export async function restoreDomainSession(apiBaseUrl: string, fetcher: typeof f
   }
 }
 
+export async function syncDomainSession(apiBaseUrl: string, accessToken: string, fetcher: typeof fetch = fetch): Promise<DomainSessionResult> {
+  const baseUrl = apiBaseUrl.replace(/\/$/, '');
+  try {
+    const response = await fetcher(`${baseUrl}/api/v1/auth/session`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    if (!response.ok) {
+      return { status: 'error', message: '无法同步 Pokokit 登录状态，可继续本地编辑。' };
+    }
+    const value: unknown = await response.json();
+    const user = readUser(value);
+    return user ? { status: 'authenticated', user } : { status: 'anonymous' };
+  } catch {
+    return { status: 'error', message: '暂时无法连接 Pokokit Cloud，可继续本地编辑。' };
+  }
+}
+
+export async function clearDomainSession(apiBaseUrl: string, fetcher: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; message: string }> {
+  const baseUrl = apiBaseUrl.replace(/\/$/, '');
+  try {
+    const response = await fetcher(`${baseUrl}/api/v1/auth/session`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    return response.ok
+      ? { ok: true }
+      : { ok: false, message: '无法清除 Pokokit 登录状态。' };
+  } catch {
+    return { ok: false, message: '暂时无法连接 Pokokit Cloud，可继续本地编辑。' };
+  }
+}
+
 function readUser(value: unknown): DomainSessionUser | null {
   if (!isRecord(value) || !isRecord(value.data)) {
     return null;

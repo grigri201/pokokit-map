@@ -3,12 +3,14 @@ export interface TerrainCell {
   y: number;
 }
 
+export type IslandTerrainColors = string[][];
+
 export const referenceIslandMacroGrid = {
   width: 23,
   height: 23,
 } as const;
 
-export const referenceIslandSubdivisions = 4;
+export const referenceIslandSubdivisions = 16;
 
 export const referenceIslandGrid = {
   width: referenceIslandMacroGrid.width * referenceIslandSubdivisions,
@@ -16,6 +18,13 @@ export const referenceIslandGrid = {
 } as const;
 
 export const referenceIslandWaterColor = '#2d8be8';
+export const referenceIslandUnifiedLandColor = '#d8c49b';
+const referenceIslandUnifiedInteriorBounds = {
+  minX: 6,
+  maxX: 18,
+  minY: 2,
+  maxY: 19,
+} as const;
 
 export const referenceIslandTerrainColors = [
   ['#3587d7', '#2d84d7', '#2d84d8', '#2f88d9', '#2c85d7', '#2fa2da', '#359dd0', '#349dd2', '#349ed0', '#339ed0', '#2f9fd4', '#35a1d6', '#349ed1', '#349ed1', '#349ed0', '#349ed1', '#369ed1', '#30a2d9', '#2c85d6', '#2d85d6', '#2c83d6', '#3087db', '#3286d7'],
@@ -43,13 +52,110 @@ export const referenceIslandTerrainColors = [
   ['#3486d9', '#2d84d8', '#2b83d6', '#2d8ad8', '#2a87d6', '#2ea1d9', '#3e99c7', '#3e99c5', '#459dc6', '#3f9bc4', '#409ac3', '#46a0ca', '#459cc5', '#469dc5', '#469cc6', '#469ec7', '#469dc6', '#2ea2d7', '#2988d6', '#2a86d5', '#2c83d4', '#3087d9', '#3086d8'],
 ] as const;
 
-export function getReferenceIslandCellColor(cell: TerrainCell): string {
+export function getReferenceIslandCellColor(cell: TerrainCell, terrainColors?: IslandTerrainColors): string {
   return getReferenceIslandMacroCellColor({
     x: Math.floor(cell.x / referenceIslandSubdivisions),
     y: Math.floor(cell.y / referenceIslandSubdivisions),
-  });
+  }, terrainColors);
 }
 
-export function getReferenceIslandMacroCellColor(cell: TerrainCell): string {
-  return referenceIslandTerrainColors[cell.y]?.[cell.x] ?? referenceIslandWaterColor;
+export function getReferenceIslandMacroCellColor(cell: TerrainCell, terrainColors?: IslandTerrainColors): string {
+  const importedColor = terrainColors?.[cell.y]?.[cell.x];
+  if (importedColor) {
+    return importedColor;
+  }
+
+  if (isReferenceIslandUnifiedInteriorCell(cell)) {
+    return referenceIslandUnifiedLandColor;
+  }
+
+  const originalColor = referenceIslandTerrainColors[cell.y]?.[cell.x] ?? referenceIslandWaterColor;
+  return isBlueReferenceTerrainColor(originalColor) ? originalColor : referenceIslandUnifiedLandColor;
+}
+
+export function sampleReferenceIslandTerrainColorsFromImageData(imageData: {
+  data: ArrayLike<number>;
+  width: number;
+  height: number;
+}): IslandTerrainColors {
+  const colors: IslandTerrainColors = [];
+  for (let y = 0; y < referenceIslandMacroGrid.height; y += 1) {
+    const row: string[] = [];
+    const sourceY = clampInteger(Math.floor(((y + 0.5) / referenceIslandMacroGrid.height) * imageData.height), 0, imageData.height - 1);
+    for (let x = 0; x < referenceIslandMacroGrid.width; x += 1) {
+      const sourceX = clampInteger(Math.floor(((x + 0.5) / referenceIslandMacroGrid.width) * imageData.width), 0, imageData.width - 1);
+      const offset = (sourceY * imageData.width + sourceX) * 4;
+      row.push(rgbToHex(
+        imageData.data[offset] ?? 0,
+        imageData.data[offset + 1] ?? 0,
+        imageData.data[offset + 2] ?? 0,
+        imageData.data[offset + 3] ?? 255,
+      ));
+    }
+    colors.push(row);
+  }
+  return colors;
+}
+
+export function isIslandTerrainColors(value: unknown): value is IslandTerrainColors {
+  return (
+    Array.isArray(value) &&
+    value.length === referenceIslandMacroGrid.height &&
+    value.every(row => (
+      Array.isArray(row) &&
+      row.length === referenceIslandMacroGrid.width &&
+      row.every(color => typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color))
+    ))
+  );
+}
+
+function isReferenceIslandUnifiedInteriorCell(cell: TerrainCell): boolean {
+  return (
+    cell.x >= referenceIslandUnifiedInteriorBounds.minX &&
+    cell.x <= referenceIslandUnifiedInteriorBounds.maxX &&
+    cell.y >= referenceIslandUnifiedInteriorBounds.minY &&
+    cell.y <= referenceIslandUnifiedInteriorBounds.maxY
+  );
+}
+
+function rgbToHex(red: number, green: number, blue: number, alpha: number): string {
+  const opacity = clampInteger(alpha, 0, 255) / 255;
+  const channels = [red, green, blue].map(channel => clampInteger(Math.round(channel * opacity + 255 * (1 - opacity)), 0, 255));
+  return `#${channels.map(channel => channel.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  return Math.min(Math.max(Math.trunc(value), min), max);
+}
+
+function isBlueReferenceTerrainColor(hexColor: string): boolean {
+  const match = /^#([0-9a-f]{6})$/i.exec(hexColor);
+  if (!match) {
+    return false;
+  }
+
+  const value = Number.parseInt(match[1]!, 16);
+  const red = ((value >> 16) & 255) / 255;
+  const green = ((value >> 8) & 255) / 255;
+  const blue = (value & 255) / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const delta = max - min;
+  if (delta === 0) {
+    return false;
+  }
+
+  let hue = 0;
+  if (max === red) {
+    hue = 60 * (((green - blue) / delta) % 6);
+  } else if (max === green) {
+    hue = 60 * ((blue - red) / delta + 2);
+  } else {
+    hue = 60 * ((red - green) / delta + 4);
+  }
+  hue = hue < 0 ? hue + 360 : hue;
+
+  const lightness = (max + min) / 2;
+  const saturation = delta / (1 - Math.abs(2 * lightness - 1));
+  return saturation >= 0.32 && hue >= 180 && hue <= 260;
 }

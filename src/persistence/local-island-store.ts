@@ -18,11 +18,17 @@ export function loadLocalIslandDocument(storage: StorageLike = window.localStora
     }
     const parsed: unknown = JSON.parse(raw);
     if (!isIslandDocumentV1(parsed)) {
-      return { ok: false, message: '本地岛屿草稿格式无效，可清除后重新开始。' };
+      storage.removeItem(localIslandStorageKey);
+      return { ok: true, value: null };
     }
     return { ok: true, value: parsed };
   } catch {
-    return { ok: false, message: '无法访问本地保存。请检查浏览器隐私模式或存储权限。' };
+    try {
+      storage.removeItem(localIslandStorageKey);
+    } catch {
+      return { ok: false, message: '无法访问本地保存。请检查浏览器隐私模式或存储权限。' };
+    }
+    return { ok: true, value: null };
   }
 }
 
