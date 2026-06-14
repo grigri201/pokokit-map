@@ -64,6 +64,10 @@ export type AppendIslandRegionNoteResult =
   | { ok: true; document: IslandDocumentV1; region: IslandRegion; note: IslandRegionNote }
   | { ok: false; message: string };
 
+export type UpdateIslandRegionCellsResult =
+  | { ok: true; document: IslandDocumentV1; region: IslandRegion }
+  | { ok: false; message: string };
+
 export function updateActiveIslandMapTerrainColors(
   document: IslandDocumentV1,
   terrainColors: IslandTerrainColors,
@@ -212,6 +216,39 @@ export function appendIslandRegionNote(document: IslandDocumentV1, regionId: str
     ok: true,
     region: updatedRegion,
     note,
+    document: {
+      ...document,
+      updatedAt: now,
+      maps: document.maps.map(map => (
+        map.id === activeMap.id
+          ? { ...map, regions: map.regions.map(candidate => candidate.id === regionId ? updatedRegion : candidate) }
+          : map
+      )),
+    },
+  };
+}
+
+export function updateIslandRegionCells(document: IslandDocumentV1, regionId: string, cells: IslandCell[], now = new Date().toISOString()): UpdateIslandRegionCellsResult {
+  const activeMap = getActiveMap(document);
+  const region = activeMap.regions.find(candidate => candidate.id === regionId);
+  if (!region) {
+    return { ok: false, message: '未找到待建造区域。' };
+  }
+
+  const normalizedCells = uniqueInBoundsCells(cells, activeMap.grid);
+  if (normalizedCells.length === 0) {
+    return { ok: false, message: '请先选择地图格子。' };
+  }
+
+  const updatedRegion = {
+    ...region,
+    cells: normalizedCells,
+    updatedAt: now,
+  };
+
+  return {
+    ok: true,
+    region: updatedRegion,
     document: {
       ...document,
       updatedAt: now,

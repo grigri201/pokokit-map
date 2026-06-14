@@ -739,6 +739,39 @@ describe('Island Designer scaffold persistence', () => {
     expect(screen.getByLabelText('入口花园 注释')).toHaveTextContent('初始注释');
   });
 
+  it('edits a saved region by adding more selected cells from the detail popover', async () => {
+    const storage = memoryStorage();
+    render(<App config={config} fetcher={mockFetch([{ data: { user: null } }])} storage={storage} />);
+
+    await createRegionFromCells('超级地球', 'map-cell-2-3', undefined, '第一条注释');
+    const originalCell = screen.getByTestId('map-cell-2-3');
+    const addedCell = screen.getByTestId('map-cell-3-3');
+
+    fireEvent.click(originalCell);
+    const detail = screen.getByLabelText('超级地球 注释');
+    await userEvent.click(within(detail).getByRole('button', { name: '编辑区域格子' }));
+
+    expect(screen.queryByLabelText('超级地球 注释')).not.toBeInTheDocument();
+    expect(originalCell).toHaveClass('selected');
+
+    fireEvent.pointerDown(addedCell);
+    fireEvent.pointerUp(addedCell);
+
+    const actionMenu = screen.getByLabelText('选区操作菜单');
+    expect(actionMenu).toHaveTextContent('32×16');
+    expect(screen.queryByLabelText('命名待建造区域')).not.toBeInTheDocument();
+
+    await userEvent.click(within(actionMenu).getByRole('button', { name: '保存区域格子' }));
+
+    expect(originalCell).toHaveAttribute('data-region-id', 'region-1');
+    expect(addedCell).toHaveAttribute('data-region-id', 'region-1');
+    expect(screen.getByLabelText('超级地球 注释')).toHaveTextContent('第一条注释');
+    await waitFor(() => {
+      const saved = JSON.parse(storage.getItem(localIslandStorageKey)!);
+      expect(saved.maps[0].regions[0].cells).toHaveLength(32 * 16);
+    });
+  });
+
   it('restores a domain session and loads the first cloud island', async () => {
     const document = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
     const fetcher = mockFetch([

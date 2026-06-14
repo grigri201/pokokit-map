@@ -23,6 +23,7 @@ import {
   nextIslandRegionId,
   removeIslandRegion,
   updateActiveIslandMapTerrainColors,
+  updateIslandRegionCells,
   type IslandCell,
   type IslandDocumentV1,
   type IslandRegion,
@@ -161,6 +162,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
   const [selectionPopoverMode, setSelectionPopoverMode] = useState<SelectionPopoverMode>(null);
   const [activeRegionDetailId, setActiveRegionDetailId] = useState<string | null>(null);
   const [regionNoteDraft, setRegionNoteDraft] = useState('');
+  const [editingRegionId, setEditingRegionId] = useState<string | null>(null);
   const [activeTooltip, setActiveTooltip] = useState<RegionTooltip | null>(null);
   const [regionSequence, setRegionSequence] = useState(1);
   const [focusedRegionId, setFocusedRegionId] = useState<string | null>(null);
@@ -545,6 +547,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setFocusedRegionId(region.id);
     setFlashRegionId(region.id);
     setPendingDeleteRegionId(null);
+    setEditingRegionId(null);
     setActiveRegionDetailId(region.id);
   }, []);
 
@@ -552,7 +555,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setActiveTooltip(null);
     setRegionError(null);
     const regionInfo = readRegionTooltipInfoFromPointer(event, macroCell, mapDetailBlockSize, regionByCell);
-    if (regionInfo) {
+    if (regionInfo && regionInfo.region.id !== editingRegionId) {
       openRegionDetail(regionInfo.region);
       return;
     }
@@ -563,7 +566,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     const anchor = resolveSelectionAnchor(event, macroCell, mapDetailBlockSize);
     selectionDragRef.current = { anchor, blockSize: mapDetailBlockSize };
     setSelection(createAccumulatedBlockSelection(anchor, anchor, mapDetailBlockSize, true, activeMap.grid, lockedSelectionCellsRef.current));
-  }, [activeMap.grid, mapDetailBlockSize, openRegionDetail, regionByCell]);
+  }, [activeMap.grid, editingRegionId, mapDetailBlockSize, openRegionDetail, regionByCell]);
 
   const handleCellPointerMove = useCallback((macroCell: IslandCell, event: ReactPointerEvent<HTMLButtonElement>) => {
     const drag = selectionDragRef.current;
@@ -619,12 +622,12 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
 
   const handleCellClick = useCallback((macroCell: IslandCell, event: { clientX: number; clientY: number; currentTarget: HTMLButtonElement }) => {
     const regionInfo = readRegionTooltipInfoFromPointer(event, macroCell, mapDetailBlockSize, regionByCell);
-    if (regionInfo) {
+    if (regionInfo && regionInfo.region.id !== editingRegionId) {
       openRegionDetail(regionInfo.region);
       return;
     }
     showRegionTooltip(null, null);
-  }, [mapDetailBlockSize, openRegionDetail, regionByCell, showRegionTooltip]);
+  }, [editingRegionId, mapDetailBlockSize, openRegionDetail, regionByCell, showRegionTooltip]);
 
   const createRegion = useCallback((event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -651,6 +654,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setActiveRegionDetailId(null);
     setFocusedRegionId(result.region.id);
     setFlashRegionId(result.region.id);
+    setEditingRegionId(null);
     setRegionSequence(current => current + 1);
     setSaveState('idle');
     setErrorMessage(null);
@@ -666,6 +670,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setActiveRegionDetailId(null);
     setRegionNoteDraft('');
     setPendingDeleteRegionId(null);
+    setEditingRegionId(null);
   }, []);
 
   const openImportFilePicker = useCallback(() => {
@@ -699,6 +704,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setSelectionPopoverMode(null);
     setRegionError(null);
     setActiveTooltip(null);
+    setEditingRegionId(null);
   }, []);
 
   const lockCurrentSelection = useCallback(() => {
@@ -713,6 +719,53 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setRegionError(null);
     setActiveTooltip(null);
   }, []);
+
+  const startEditingRegionCells = useCallback(() => {
+    if (!activeRegionDetail) {
+      return;
+    }
+    const firstCell = activeRegionDetail.cells[0] ?? null;
+    const lastCell = activeRegionDetail.cells.at(-1) ?? firstCell;
+    lockedSelectionCellsRef.current = activeRegionDetail.cells;
+    setSelection({
+      anchor: firstCell,
+      focus: lastCell,
+      cells: activeRegionDetail.cells,
+      dragging: false,
+    });
+    setEditingRegionId(activeRegionDetail.id);
+    setSelectionPopoverMode(null);
+    setActiveRegionDetailId(null);
+    setRegionNoteDraft('');
+    setPendingDeleteRegionId(null);
+    setRegionError(null);
+    setActiveTooltip(null);
+  }, [activeRegionDetail]);
+
+  const saveEditingRegionCells = useCallback(() => {
+    if (!editingRegionId) {
+      return;
+    }
+    const result = updateIslandRegionCells(document, editingRegionId, selection.cells);
+    if (!result.ok) {
+      setRegionError(result.message);
+      return;
+    }
+
+    setDocument(result.document);
+    setSelection(clearSelection());
+    lockedSelectionCellsRef.current = [];
+    setSelectionPopoverMode(null);
+    setRegionDraft({ label: '', note: '' });
+    setRegionError(null);
+    setActiveTooltip(null);
+    setActiveRegionDetailId(result.region.id);
+    setFocusedRegionId(result.region.id);
+    setFlashRegionId(result.region.id);
+    setEditingRegionId(null);
+    setSaveState('idle');
+    setErrorMessage(null);
+  }, [document, editingRegionId, selection.cells]);
 
   const selectRegion = useCallback((region: IslandRegion) => {
     const firstCell = region.cells[0];
@@ -765,6 +818,12 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
       setActiveRegionDetailId(null);
       setRegionNoteDraft('');
     }
+    if (editingRegionId === regionId) {
+      setEditingRegionId(null);
+      lockedSelectionCellsRef.current = [];
+      setSelection(clearSelection());
+      setSelectionPopoverMode(null);
+    }
     setRegionError(null);
     setActiveTooltip(null);
     if (focusedRegionId === regionId) {
@@ -776,7 +835,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setPendingDeleteRegionId(null);
     setSaveState('idle');
     setErrorMessage(null);
-  }, [activeRegionDetailId, document, flashRegionId, focusedRegionId]);
+  }, [activeRegionDetailId, document, editingRegionId, flashRegionId, focusedRegionId]);
 
   const deleteActiveRegion = useCallback(() => {
     if (!activeRegionDetailId) {
@@ -799,6 +858,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setActiveRegionDetailId(null);
     setRegionNoteDraft('');
     setRegionError(null);
+    setEditingRegionId(null);
   }, []);
 
   const renameActiveMap = useCallback((name: string) => {
@@ -1213,7 +1273,15 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
               <strong className="selection-size">{formatSelectionSize(selectionBounds)}</strong>
               <div className="selection-command-row">
                 <button className="icon-action" type="button" aria-label="继续添加选区" title="继续添加选区" onClick={lockCurrentSelection}>+</button>
-                <button className="icon-action confirm" type="button" aria-label="命名选区" title="命名选区" onClick={showNamePopover}>✓</button>
+                <button
+                  className="icon-action confirm"
+                  type="button"
+                  aria-label={editingRegionId ? '保存区域格子' : '命名选区'}
+                  title={editingRegionId ? '保存区域格子' : '命名选区'}
+                  onClick={editingRegionId ? saveEditingRegionCells : showNamePopover}
+                >
+                  ✓
+                </button>
                 <button className="icon-action cancel" type="button" aria-label="取消选区" title="取消选区" onClick={cancelRegionDraft}>×</button>
               </div>
             </>
@@ -1270,6 +1338,12 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
               onChange={event => setRegionNoteDraft(event.target.value)}
               placeholder="添加更多注释"
             />
+            <button className="icon-action" type="button" aria-label="编辑区域格子" title="编辑区域格子" onClick={startEditingRegionCells}>
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+            </button>
             <button className="icon-action danger" type="button" aria-label="删除区域" title="删除区域" onClick={deleteActiveRegion}>
               <svg aria-hidden="true" viewBox="0 0 24 24">
                 <path d="M3 6h18" />
