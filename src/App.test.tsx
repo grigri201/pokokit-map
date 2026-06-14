@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { IslandAuthClient } from './auth/supabase-client';
 import type { AppConfig } from './config';
-import { createDefaultIslandDocument, islandRegionPalette, localIslandStorageKey } from './domain/island-document';
+import { createDefaultIslandDocument, currentIslandMapId, islandRegionPalette, localIslandStorageKey, normalizeIslandDocumentGrid, type IslandDocumentV1 } from './domain/island-document';
 import { referenceIslandTerrainGrid, referenceIslandUnifiedLandColor } from './domain/island-terrain';
 import type { StorageLike } from './persistence/local-island-store';
 
@@ -37,6 +37,7 @@ describe('Island Designer scaffold persistence', () => {
     const fileMenu = screen.getByRole('menu', { name: '文件菜单' });
     expect(fileButton).toHaveAttribute('aria-expanded', 'true');
     expect(within(fileMenu).getByRole('menuitem', { name: '导入背景图' })).toBeInTheDocument();
+    expect(within(fileMenu).queryByRole('menuitem', { name: '保存' })).not.toBeInTheDocument();
     expect(within(fileMenu).queryByRole('menuitem', { name: '导出' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('导入背景图')).toHaveAttribute('accept', 'image/png,image/jpeg,image/webp,image/*');
     expect(screen.queryByText(/Island Designer/i)).not.toBeInTheDocument();
@@ -103,9 +104,13 @@ describe('Island Designer scaffold persistence', () => {
         }),
       );
     });
-    expect(screen.getByText('发现本地匿名草稿')).toBeInTheDocument();
+    expect(screen.queryByText('发现本地匿名草稿')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('云端存档冲突')).not.toBeInTheDocument();
     const accountButton = within(toolbar).getByRole('button', { name: 'Owner' });
     expect(accountButton).toBeInTheDocument();
+    await userEvent.click(within(toolbar).getByRole('button', { name: '文件' }));
+    expect(screen.getByRole('menuitem', { name: '保存' })).toBeInTheDocument();
+    await userEvent.click(within(toolbar).getByRole('button', { name: '文件' }));
     await userEvent.click(accountButton);
     const accountMenu = screen.getByRole('dialog', { name: '账户菜单' });
     expect(within(accountMenu).queryByText('Owner')).not.toBeInTheDocument();
@@ -120,7 +125,7 @@ describe('Island Designer scaffold persistence', () => {
     const fetcher = mockFetch([
       { data: { user: { id: 'owner-1' } } },
       { data: { user: { id: 'owner-1', nickname: 'Owner' } } },
-      { data: [] },
+      { error: { code: 'map_not_found', message: 'Map was not found.' }, status: 404 },
     ]);
 
     render(<App config={config} fetcher={fetcher} storage={memoryStorage()} authClient={authClient} />);
@@ -204,7 +209,7 @@ describe('Island Designer scaffold persistence', () => {
     await waitFor(() => expect(storage.getItem(localIslandStorageKey)).not.toBeNull());
 
     const saved = storage.getItem(localIslandStorageKey);
-    expect(JSON.parse(saved!)).toMatchObject({ version: 1, activeMapId: 'map-1' });
+    expect(JSON.parse(saved!)).toMatchObject({ version: 1, activeMapId: currentIslandMapId });
     expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('title', '已保存到此浏览器');
   });
 
@@ -853,65 +858,141 @@ describe('Island Designer scaffold persistence', () => {
     });
   });
 
-  it('restores a domain session and loads the first cloud island', async () => {
-    const document = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
+  it('restores a domain session, downloads cloud-only map data and writes it locally', async () => {
+    const storage = memoryStorage();
+    const document = documentWithRegion('云端营地');
     const fetcher = mockFetch([
       { data: { user: { id: 'owner-1' } } },
-      { data: [{ id: 'island-1', owner_user_id: 'owner-1', name: 'Cloud island', document, created_at: '2026-06-13T00:00:00.000Z', updated_at: '2026-06-13T00:00:00.000Z' }] },
+      { data: cloudMapData(document) },
     ]);
 
-    render(<App config={config} fetcher={fetcher} storage={memoryStorage()} />);
+    render(<App config={config} fetcher={fetcher} storage={storage} />);
 
     const toolbar = await screen.findByRole('group', { name: '主工具栏' });
     expect(within(toolbar).getByRole('button', { name: 'owner-1' })).toBeInTheDocument();
     expect(within(toolbar).getByRole('button', { name: '文件' })).toHaveAttribute('title', '已保存到 Pokokit Cloud');
     expect(fetcher).toHaveBeenCalledWith('https://api.test/api/v1/auth/session', expect.objectContaining({ credentials: 'include' }));
-    expect(fetcher).toHaveBeenCalledWith('https://api.test/api/v1/islands', expect.objectContaining({ credentials: 'include' }));
+    expect(fetcher).toHaveBeenCalledWith('https://api.test/api/v1/maps/cloud-island', expect.objectContaining({ credentials: 'include' }));
+    expect(screen.getByLabelText('待建造区域列表')).toHaveTextContent('云端营地');
+    await waitFor(() => expect(storage.getItem(localIslandStorageKey)).toContain('云端营地'));
   });
 
-  it('creates a cloud island when a logged-in user saves without an existing record', async () => {
+  it('creates a cloud map only after a logged-in user clicks Save', async () => {
     const fetcher = mockFetch([
       { data: { user: { id: 'owner-1' } } },
-      { data: [] },
-      { data: { id: 'island-1', owner_user_id: 'owner-1', name: 'My island plan', document: createDefaultIslandDocument(), created_at: '2026-06-13T00:00:00.000Z', updated_at: '2026-06-13T00:00:00.000Z' } },
+      { error: { code: 'map_not_found', message: 'Map was not found.' }, status: 404 },
+      { data: cloudMapData(createDefaultIslandDocument()) },
     ]);
     render(<App config={config} fetcher={fetcher} storage={memoryStorage()} />);
 
-    await screen.findByRole('group', { name: '主工具栏' });
-    await waitFor(() => expect(fetcher).toHaveBeenLastCalledWith('https://api.test/api/v1/islands', expect.objectContaining({ method: 'POST', credentials: 'include' })));
+    const toolbar = await screen.findByRole('group', { name: '主工具栏' });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(fetcher).not.toHaveBeenCalledWith('https://api.test/api/v1/maps/cloud-island', expect.objectContaining({ method: 'PUT' }));
+
+    await userEvent.click(within(toolbar).getByRole('button', { name: '文件' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: '保存' }));
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalledWith('https://api.test/api/v1/maps/cloud-island', expect.objectContaining({ method: 'PUT', credentials: 'include' })));
+    expect(within(toolbar).getByRole('button', { name: '文件' })).toHaveAttribute('title', '已保存到 Pokokit Cloud');
   });
 
   it('shows recoverable cloud save errors', async () => {
     const fetcher = mockFetch([
       { data: { user: { id: 'owner-1' } } },
-      { data: [] },
+      { error: { code: 'map_not_found', message: 'Map was not found.' }, status: 404 },
       { error: { code: 'auth_missing_token', message: 'Please sign in again.' }, status: 401 },
     ]);
     render(<App config={config} fetcher={fetcher} storage={memoryStorage()} />);
 
-    await screen.findByRole('group', { name: '主工具栏' });
+    const toolbar = await screen.findByRole('group', { name: '主工具栏' });
+    await userEvent.click(within(toolbar).getByRole('button', { name: '文件' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: '保存' }));
+
     await waitFor(() => expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('title', '保存失败'));
   });
 
-  it('requires an explicit choice before uploading a local draft after login', async () => {
+  it('keeps local-only data local until a logged-in user clicks Save', async () => {
     const storage = memoryStorage();
-    storage.setItem(localIslandStorageKey, JSON.stringify(createDefaultIslandDocument()));
-    const fetcher = mockFetch([{ data: { user: { id: 'owner-1', nickname: 'Owner' } } }]);
+    const localDocument = documentWithRegion('本地营地');
+    storage.setItem(localIslandStorageKey, JSON.stringify(localDocument));
+    const fetcher = mockFetch([
+      { data: { user: { id: 'owner-1', nickname: 'Owner' } } },
+      { error: { code: 'map_not_found', message: 'Map was not found.' }, status: 404 },
+      { data: cloudMapData(localDocument) },
+    ]);
 
     render(<App config={config} fetcher={fetcher} storage={storage} />);
 
-    expect(await screen.findByText('发现本地匿名草稿')).toBeInTheDocument();
     const toolbar = screen.getByRole('group', { name: '主工具栏' });
+    await screen.findByLabelText('待建造区域列表');
     expect(within(toolbar).getByRole('button', { name: 'Owner' })).toHaveAttribute('title', '当前继续本地保存');
-    expect(screen.getByRole('button', { name: '保存到云端' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '继续本地' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '丢弃本地草稿' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('云端存档冲突')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('待建造区域列表')).toHaveTextContent('本地营地');
 
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
-    await userEvent.click(screen.getByRole('button', { name: '继续本地' }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    await userEvent.click(within(toolbar).getByRole('button', { name: '文件' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: '保存' }));
 
-    expect(screen.queryByText('发现本地匿名草稿')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('title', '本地待保存');
+    await waitFor(() => expect(fetcher).toHaveBeenCalledWith('https://api.test/api/v1/maps/cloud-island', expect.objectContaining({ method: 'PUT' })));
+    expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('title', '已保存到 Pokokit Cloud');
+  });
+
+  it('ignores matching local and cloud saves by hash', async () => {
+    const storage = memoryStorage();
+    const localDocument = documentWithRegion('相同营地');
+    const cloudDocument = {
+      ...localDocument,
+      updatedAt: '2026-06-14T00:00:00.000Z',
+    };
+    storage.setItem(localIslandStorageKey, JSON.stringify(localDocument));
+    const fetcher = mockFetch([
+      { data: { user: { id: 'owner-1' } } },
+      { data: cloudMapData(cloudDocument) },
+    ]);
+
+    render(<App config={config} fetcher={fetcher} storage={storage} />);
+
+    await screen.findByLabelText('待建造区域列表');
+    expect(screen.queryByLabelText('云端存档冲突')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('title', '已保存到 Pokokit Cloud');
+    expect(screen.getByLabelText('待建造区域列表')).toHaveTextContent('相同营地');
+  });
+
+  it('keeps local data when the user rejects a differing cloud save', async () => {
+    const storage = memoryStorage();
+    storage.setItem(localIslandStorageKey, JSON.stringify(documentWithRegion('本地版本')));
+    const fetcher = mockFetch([
+      { data: { user: { id: 'owner-1' } } },
+      { data: cloudMapData(documentWithRegion('云端版本')) },
+    ]);
+
+    render(<App config={config} fetcher={fetcher} storage={storage} />);
+
+    const prompt = await screen.findByLabelText('云端存档冲突');
+    expect(prompt).toHaveTextContent('是否用云端数据覆盖本地？');
+    await userEvent.click(within(prompt).getByRole('button', { name: '否' }));
+
+    expect(screen.queryByLabelText('云端存档冲突')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('待建造区域列表')).toHaveTextContent('本地版本');
+    expect(storage.getItem(localIslandStorageKey)).toContain('本地版本');
+  });
+
+  it('overwrites local data when the user accepts a differing cloud save', async () => {
+    const storage = memoryStorage();
+    storage.setItem(localIslandStorageKey, JSON.stringify(documentWithRegion('本地版本')));
+    const fetcher = mockFetch([
+      { data: { user: { id: 'owner-1' } } },
+      { data: cloudMapData(documentWithRegion('云端版本')) },
+    ]);
+
+    render(<App config={config} fetcher={fetcher} storage={storage} />);
+
+    const prompt = await screen.findByLabelText('云端存档冲突');
+    await userEvent.click(within(prompt).getByRole('button', { name: '是' }));
+
+    expect(screen.queryByLabelText('云端存档冲突')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('待建造区域列表')).toHaveTextContent('云端版本');
+    expect(storage.getItem(localIslandStorageKey)).toContain('云端版本');
   });
 });
 
@@ -943,6 +1024,68 @@ function mockAuthClient(overrides: Partial<IslandAuthClient> = {}): IslandAuthCl
     signUp: vi.fn(async () => ({ error: null, session: null })),
     signOut: vi.fn(async () => {}),
     ...overrides,
+  };
+}
+
+function documentWithRegion(label: string): IslandDocumentV1 {
+  const document = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
+  return normalizeIslandDocumentGrid({
+    ...document,
+    maps: [
+      {
+        ...document.maps[0]!,
+        regions: [
+          {
+            id: 'region-1',
+            label,
+            color: islandRegionPalette[0],
+            cells: [{ x: 1, y: 1 }],
+            notes: [
+              {
+                id: 'region-1-note-1',
+                text: `${label} 注释`,
+                createdAt: '2026-06-13T00:00:00.000Z',
+              },
+            ],
+            createdAt: '2026-06-13T00:00:00.000Z',
+            updatedAt: '2026-06-13T00:00:00.000Z',
+          },
+        ],
+      },
+    ],
+  });
+}
+
+function cloudMapData(document: IslandDocumentV1, islandId = 'island-1') {
+  const normalized = normalizeIslandDocumentGrid(document);
+  const map = normalized.maps[0];
+  if (!map) {
+    throw new Error('Missing test map');
+  }
+  return {
+    islandId,
+    mapId: map.id,
+    name: map.name,
+    backgroundColor: map.backgroundColor ?? '#2d8be8',
+    grid: map.grid,
+    ...(map.terrainColors ? { terrainColors: map.terrainColors } : {}),
+    selectedAreas: map.regions.map(region => ({
+      id: region.id,
+      title: region.label,
+      color: region.color,
+      cells: region.cells,
+      note: region.notes.map(note => note.text).join('\n'),
+      notes: region.notes.map(note => ({
+        id: note.id,
+        text: note.text,
+        createdAt: note.createdAt,
+      })),
+      createdAt: region.createdAt,
+      updatedAt: region.updatedAt,
+    })),
+    updatedAt: normalized.updatedAt,
+    created_at: '2026-06-13T00:00:00.000Z',
+    updated_at: '2026-06-13T00:00:00.000Z',
   };
 }
 
@@ -996,13 +1139,24 @@ function installImageImportStubs(imageData: ImageData): void {
 
 function mockFetch(items: Array<Record<string, unknown> & { status?: number }>) {
   const queue = [...items];
-  return vi.fn<typeof fetch>(async () => {
-    const next = queue.shift() ?? { data: { user: null } };
+  return vi.fn<typeof fetch>(async input => {
+    const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+    const next = queue.shift() ?? defaultMockFetchItem(url);
     return new Response(JSON.stringify(next.status && next.status >= 400 ? { error: next.error } : { data: next.data }), {
       status: next.status ?? 200,
       headers: { 'content-type': 'application/json' },
     });
   });
+}
+
+function defaultMockFetchItem(url: string): Record<string, unknown> & { status?: number } {
+  if (url.endsWith('/api/v1/maps/cloud-island')) {
+    return { error: { code: 'map_not_found', message: 'Map was not found.' }, status: 404 };
+  }
+  if (url.endsWith('/api/v1/islands')) {
+    return { data: [] };
+  }
+  return { data: { user: null } };
 }
 
 function rectAt(x: number, y: number, width: number, height: number): DOMRect {

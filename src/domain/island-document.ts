@@ -1,4 +1,4 @@
-import { isIslandTerrainColors, referenceIslandGrid, referenceIslandMacroGrid, referenceIslandSubdivisions, type IslandTerrainColors } from './island-terrain';
+import { isIslandTerrainColors, referenceIslandGrid, referenceIslandMacroGrid, referenceIslandSubdivisions, referenceIslandWaterColor, type IslandTerrainColors } from './island-terrain';
 
 export interface IslandCell {
   x: number;
@@ -29,6 +29,7 @@ export interface IslandMap {
     width: number;
     height: number;
   };
+  backgroundColor?: string;
   terrainColors?: IslandTerrainColors;
   regions: IslandRegion[];
 }
@@ -41,6 +42,7 @@ export interface IslandDocumentV1 {
 }
 
 export const localIslandStorageKey = 'pokokit.islandDesigner.document.v1';
+export const currentIslandMapId = 'cloud-island';
 export const islandRegionPalette = ['#d95f39', '#6f8f2f', '#c58a14', '#c94f7c', '#7a6a2e', '#e07a4f'] as const;
 export const islandRegionLabelMaxLength = 100;
 
@@ -97,16 +99,17 @@ export function updateActiveIslandMapTerrainColors(
 export function createDefaultIslandDocument(now = new Date().toISOString()): IslandDocumentV1 {
   return {
     version: 1,
-    activeMapId: 'map-1',
+    activeMapId: currentIslandMapId,
     maps: [
       {
-        id: 'map-1',
+        id: currentIslandMapId,
         name: '第一张岛屿地图',
         order: 0,
         grid: {
           width: referenceIslandGrid.width,
           height: referenceIslandGrid.height,
         },
+        backgroundColor: referenceIslandWaterColor,
         regions: [],
       },
     ],
@@ -120,7 +123,8 @@ export function getActiveMap(document: IslandDocumentV1): IslandMap {
 
 export function normalizeIslandDocumentGrid(document: IslandDocumentV1, now = new Date().toISOString()): IslandDocumentV1 {
   let changed = false;
-  const maps = document.maps.map(map => {
+  const hasSingleMap = document.maps.length === 1;
+  const maps = document.maps.map((map, index) => {
     const nextRegions: IslandRegion[] = [];
     const isCurrentGrid = map.grid.width === referenceIslandGrid.width && map.grid.height === referenceIslandGrid.height;
     for (const region of map.regions) {
@@ -144,8 +148,18 @@ export function normalizeIslandDocumentGrid(document: IslandDocumentV1, now = ne
     if (map.grid.width !== referenceIslandGrid.width || map.grid.height !== referenceIslandGrid.height) {
       changed = true;
     }
+    const nextMapId = hasSingleMap && index === 0 ? currentIslandMapId : map.id;
+    if (nextMapId !== map.id) {
+      changed = true;
+    }
+    const backgroundColor = isHexColor(map.backgroundColor) ? map.backgroundColor.toLowerCase() : referenceIslandWaterColor;
+    if (backgroundColor !== map.backgroundColor) {
+      changed = true;
+    }
     return {
       ...map,
+      id: nextMapId,
+      backgroundColor,
       grid: {
         width: referenceIslandGrid.width,
         height: referenceIslandGrid.height,
@@ -153,8 +167,16 @@ export function normalizeIslandDocumentGrid(document: IslandDocumentV1, now = ne
       regions: nextRegions,
     };
   });
+  const activeMapId = hasSingleMap ? currentIslandMapId : document.activeMapId;
+  if (activeMapId !== document.activeMapId) {
+    changed = true;
+  }
 
-  return changed ? { ...document, maps, updatedAt: now } : document;
+  return changed ? { ...document, activeMapId, maps, updatedAt: now } : document;
+}
+
+export function hashIslandDocumentSnapshot(document: IslandDocumentV1): string {
+  return fnv1aHash(stableStringify(toHashableDocument(document)));
 }
 
 export function createIslandRegion(document: IslandDocumentV1, input: CreateIslandRegionInput): CreateIslandRegionResult {
@@ -324,6 +346,9 @@ function isIslandMap(value: unknown): value is IslandMap {
   if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string' || typeof value.order !== 'number' || !isRecord(value.grid) || !Array.isArray(value.regions)) {
     return false;
   }
+  if (Object.prototype.hasOwnProperty.call(value, 'backgroundColor') && !isHexColor(value.backgroundColor)) {
+    return false;
+  }
   if (Object.prototype.hasOwnProperty.call(value, 'terrainColors') && !isIslandTerrainColors(value.terrainColors)) {
     return false;
   }
@@ -359,6 +384,58 @@ function isIslandRegionNote(value: unknown): value is IslandRegionNote {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isHexColor(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
+}
+
+function toHashableDocument(document: IslandDocumentV1) {
+  return {
+    version: document.version,
+    activeMapId: document.activeMapId,
+    maps: document.maps.map(map => ({
+      id: map.id,
+      name: map.name,
+      order: map.order,
+      grid: map.grid,
+      backgroundColor: map.backgroundColor ?? referenceIslandWaterColor,
+      terrainColors: map.terrainColors,
+      regions: map.regions.map(region => ({
+        id: region.id,
+        label: region.label,
+        color: region.color,
+        cells: [...region.cells].sort(compareCells),
+        notes: region.notes.map(note => ({
+          id: note.id,
+          text: note.text,
+        })),
+      })),
+    })),
+  };
+}
+
+function compareCells(left: IslandCell, right: IslandCell): number {
+  return left.y - right.y || left.x - right.x;
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function fnv1aHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 function isAllowedRegionColor(color: string): boolean {

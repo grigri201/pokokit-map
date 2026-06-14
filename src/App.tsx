@@ -18,6 +18,7 @@ import {
   createDefaultIslandDocument,
   createIslandRegion,
   getActiveMap,
+  hashIslandDocumentSnapshot,
   normalizeIslandDocumentGrid,
   islandRegionPalette,
   nextIslandRegionId,
@@ -43,9 +44,8 @@ import {
   clearSelection,
 } from './domain/selection';
 import { readAppConfig, type AppConfig } from './config';
-import { IslandApiClient, IslandApiError, type IslandRecord } from './persistence/island-api-client';
+import { IslandApiClient, IslandApiError, type CloudMapRecord } from './persistence/island-api-client';
 import {
-  clearLocalIslandDocument,
   loadLocalIslandDocument,
   saveLocalIslandDocument,
   type StorageLike,
@@ -161,11 +161,11 @@ const mediumDetailBlockSize = 4;
 export function App({ config = readAppConfig(), fetcher = fetch, locale = readBrowserLocale(), storage = window.localStorage, authClient: providedAuthClient }: AppProps) {
   const [auth, setAuth] = useState<AuthState>({ status: 'checking' });
   const [document, setDocument] = useState<IslandDocumentV1>(() => createDefaultIslandDocument());
-  const [cloudRecord, setCloudRecord] = useState<IslandRecord | null>(null);
+  const [cloudRecord, setCloudRecord] = useState<CloudMapRecord | null>(null);
   const [mode, setMode] = useState<PersistenceMode>('local');
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [migrationDraft, setMigrationDraft] = useState<IslandDocumentV1 | null>(null);
+  const [cloudConflictDocument, setCloudConflictDocument] = useState<IslandDocumentV1 | null>(null);
   const [selection, setSelection] = useState(clearSelection);
   const [regionDraft, setRegionDraft] = useState<RegionDraft>({ label: '' });
   const [regionError, setRegionError] = useState<string | null>(null);
@@ -197,7 +197,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
   const selectionDragRef = useRef<SelectionDragState | null>(null);
   const lockedSelectionCellsRef = useRef<IslandCell[]>([]);
   const lastSavedDocumentRef = useRef<IslandDocumentV1 | null>(null);
-  const cloudRecordRef = useRef<IslandRecord | null>(null);
+  const cloudRecordRef = useRef<CloudMapRecord | null>(null);
 
   const apiClient = useMemo(() => new IslandApiClient({ apiBaseUrl: config.apiBaseUrl, fetcher }), [config.apiBaseUrl, fetcher]);
   const defaultAuthClient = useMemo(() => createIslandAuthClient(config), [config.supabasePublishableKey, config.supabaseUrl]);
@@ -207,19 +207,49 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     cloudRecordRef.current = cloudRecord;
   }, [cloudRecord]);
 
-  const loadCloudIsland = useCallback(async () => {
+  const readCloudIsland = useCallback(async (): Promise<CloudMapRecord | null> => {
+    const record = await apiClient.getCloudMap();
+    return record ? { ...record, document: normalizeIslandDocumentGrid(record.document) } : null;
+  }, [apiClient]);
+
+  const reconcileAuthenticatedDocument = useCallback(async (localDocument: IslandDocumentV1 | null) => {
     setSaveState('pending');
     try {
-      const islands = await apiClient.listIslands();
-      const first = islands[0] ?? null;
-      if (first) {
-        const loadedDocument = normalizeIslandDocumentGrid(first.document);
-        setCloudRecord({ ...first, document: loadedDocument });
-        setDocument(loadedDocument);
+      const cloud = await readCloudIsland();
+      setCloudRecord(cloud);
+      setCloudConflictDocument(null);
+
+      if (localDocument && cloud) {
+        const localHash = hashIslandDocumentSnapshot(localDocument);
+        const cloudHash = hashIslandDocumentSnapshot(cloud.document);
+        setDocument(localDocument);
+        if (localHash === cloudHash) {
+          setMode('cloud');
+          lastSavedDocumentRef.current = localDocument;
+          setSaveState('saved');
+        } else {
+          setMode('local');
+          setCloudConflictDocument(cloud.document);
+          setSaveState('idle');
+        }
+      } else if (localDocument) {
+        setDocument(localDocument);
+        setMode('local');
+        setSaveState('idle');
+      } else if (cloud) {
+        setDocument(cloud.document);
+        setMode('cloud');
+        const saved = saveLocalIslandDocument(cloud.document, storage);
+        if (!saved.ok) {
+          setErrorMessage(saved.message);
+          setSaveState('error');
+          return;
+        }
+        lastSavedDocumentRef.current = cloud.document;
         setSaveState('saved');
       } else {
-        setCloudRecord(null);
         setDocument(createDefaultIslandDocument());
+        setMode('cloud');
         setSaveState('idle');
       }
       setErrorMessage(null);
@@ -227,7 +257,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
       setSaveState('error');
       setErrorMessage(readSafeError(error, '无法载入云端岛屿，可稍后重试。'));
     }
-  }, [apiClient]);
+  }, [readCloudIsland, storage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -255,16 +285,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
 
       if (session.status === 'authenticated') {
         setAuth({ status: 'authenticated', user: session.user });
-        if (localDocument) {
-          setDocument(localDocument);
-          setMigrationDraft(localDocument);
-          setMode('local');
-          setSaveState('idle');
-          setBootstrapped(true);
-          return;
-        }
-        setMode('cloud');
-        await loadCloudIsland();
+        await reconcileAuthenticatedDocument(localDocument);
         setBootstrapped(true);
         return;
       }
@@ -280,7 +301,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     return () => {
       cancelled = true;
     };
-  }, [authClient, config.apiBaseUrl, fetcher, loadCloudIsland, storage]);
+  }, [authClient, config.apiBaseUrl, fetcher, reconcileAuthenticatedDocument, storage]);
 
   useEffect(() => {
     if (!flashRegionId) {
@@ -290,18 +311,31 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     return () => window.clearTimeout(timeoutId);
   }, [flashRegionId]);
 
+  const saveLocalNow = useCallback((documentToSave: IslandDocumentV1) => {
+    const saved = saveLocalIslandDocument(documentToSave, storage);
+    setSaveState(saved.ok ? 'saved' : 'error');
+    setErrorMessage(saved.ok ? null : saved.message);
+    if (saved.ok) {
+      lastSavedDocumentRef.current = documentToSave;
+    }
+    return saved.ok;
+  }, [storage]);
+
   const saveNow = useCallback(async (documentToSave = document) => {
+    const normalizedDocument = normalizeIslandDocumentGrid(documentToSave);
     setSaveState('pending');
-    if (mode === 'cloud' && auth.status === 'authenticated') {
+    if (auth.status === 'authenticated') {
       try {
         const currentCloudRecord = cloudRecordRef.current;
-        const saved = currentCloudRecord
-          ? await apiClient.updateIsland(currentCloudRecord.id, { name: 'My island plan', document: documentToSave })
-          : await apiClient.createIsland({ name: 'My island plan', document: documentToSave });
-        setCloudRecord(saved);
+        const saved = await apiClient.saveCloudMap(normalizedDocument, currentCloudRecord);
+        setCloudRecord({ ...saved, document: normalizedDocument });
+        setDocument(normalizedDocument);
+        setMode('cloud');
+        setCloudConflictDocument(null);
+        saveLocalIslandDocument(normalizedDocument, storage);
         setSaveState('saved');
         setErrorMessage(null);
-        lastSavedDocumentRef.current = documentToSave;
+        lastSavedDocumentRef.current = normalizedDocument;
       } catch (error) {
         setSaveState('error');
         setErrorMessage(readSafeError(error, '保存到 Pokokit Cloud 失败，可重试。'));
@@ -309,63 +343,36 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
       return;
     }
 
-    const saved = saveLocalIslandDocument(documentToSave, storage);
-    setSaveState(saved.ok ? 'saved' : 'error');
-    setErrorMessage(saved.ok ? null : saved.message);
-    if (saved.ok) {
-      lastSavedDocumentRef.current = documentToSave;
-    }
-  }, [apiClient, auth.status, document, mode, storage]);
+    saveLocalNow(normalizedDocument);
+  }, [apiClient, auth.status, document, saveLocalNow, storage]);
 
   useEffect(() => {
-    if (!bootstrapped || migrationDraft || lastSavedDocumentRef.current === document) {
+    const shouldAutoSaveLocal = auth.status !== 'authenticated' || mode === 'local';
+    if (!bootstrapped || !shouldAutoSaveLocal || lastSavedDocumentRef.current === document) {
       return undefined;
     }
     const timeoutId = window.setTimeout(() => {
-      void saveNow(document);
+      saveLocalNow(document);
     }, 450);
     return () => window.clearTimeout(timeoutId);
-  }, [bootstrapped, document, migrationDraft, saveNow]);
+  }, [auth.status, bootstrapped, document, mode, saveLocalNow]);
 
-  const saveLocalDraftToCloud = useCallback(async () => {
-    if (!migrationDraft || auth.status !== 'authenticated') {
+  const acceptCloudOverwrite = useCallback(() => {
+    if (!cloudConflictDocument) {
       return;
     }
+    setDocument(cloudConflictDocument);
+    saveLocalNow(cloudConflictDocument);
     setMode('cloud');
-    setSaveState('pending');
-    try {
-      const saved = cloudRecord
-        ? await apiClient.updateIsland(cloudRecord.id, { name: 'My island plan', document: migrationDraft })
-        : await apiClient.createIsland({ name: 'My island plan', document: migrationDraft });
-      setCloudRecord(saved);
-      setDocument(saved.document);
-      clearLocalIslandDocument(storage);
-      setMigrationDraft(null);
-      setSaveState('saved');
-      setErrorMessage(null);
-    } catch (error) {
-      setSaveState('error');
-      setMode('local');
-      setErrorMessage(readSafeError(error, '本地草稿保存到云端失败，可继续本地编辑或重试。'));
-    }
-  }, [apiClient, auth.status, cloudRecord, migrationDraft, storage]);
+    setCloudConflictDocument(null);
+    setErrorMessage(null);
+  }, [cloudConflictDocument, saveLocalNow]);
 
-  const continueLocalDraft = useCallback(() => {
+  const keepLocalDraft = useCallback(() => {
     setMode('local');
-    setMigrationDraft(null);
+    setCloudConflictDocument(null);
     setSaveState('idle');
   }, []);
-
-  const discardLocalDraft = useCallback(async () => {
-    clearLocalIslandDocument(storage);
-    setMigrationDraft(null);
-    setMode(auth.status === 'authenticated' ? 'cloud' : 'local');
-    if (auth.status === 'authenticated') {
-      await loadCloudIsland();
-    } else {
-      setDocument(createDefaultIslandDocument());
-    }
-  }, [auth.status, loadCloudIsland, storage]);
 
   const completeAuthSession = useCallback(async (session: Session) => {
     const syncedSession = await syncDomainSession(config.apiBaseUrl, session.access_token, fetcher);
@@ -386,15 +393,8 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setAuthFormNotice(null);
     setAuthMenuOpen(false);
 
-    if (mode === 'local') {
-      setMigrationDraft(document);
-      setSaveState('idle');
-      return;
-    }
-
-    setMode('cloud');
-    await loadCloudIsland();
-  }, [config.apiBaseUrl, document, fetcher, loadCloudIsland, mode]);
+    await reconcileAuthenticatedDocument(normalizeIslandDocumentGrid(document));
+  }, [config.apiBaseUrl, document, fetcher, reconcileAuthenticatedDocument]);
 
   const submitAuthForm = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -434,7 +434,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setAuth({ status: 'anonymous' });
     setMode('local');
     setCloudRecord(null);
-    setMigrationDraft(null);
+    setCloudConflictDocument(null);
     setAuthMenuOpen(false);
     setAuthFormError(cleared.ok ? null : cleared.message);
     setAuthPending(false);
@@ -1256,19 +1256,32 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
           />
           {fileMenuOpen ? (
             <div className="floating-panel file-menu" role="menu" aria-label="文件菜单">
+              {auth.status === 'authenticated' ? (
+                <button
+                  className="file-menu-item"
+                  type="button"
+                  role="menuitem"
+                  disabled={saveState === 'pending'}
+                  onClick={() => {
+                    setFileMenuOpen(false);
+                    void saveNow();
+                  }}
+                >
+                  保存
+                </button>
+              ) : null}
               <button className="file-menu-item" type="button" role="menuitem" onClick={openImportFilePicker}>导入背景图</button>
             </div>
           ) : null}
         </div>
       </div>
 
-      {migrationDraft ? (
-        <section className="floating-panel migration-panel migration-popover" aria-label="本地草稿处理">
-          <strong>发现本地匿名草稿</strong>
-          <p>选择后才会处理这份草稿，不会自动上传。</p>
-          <button type="button" onClick={() => void saveLocalDraftToCloud()}>保存到云端</button>
-          <button type="button" onClick={continueLocalDraft}>继续本地</button>
-          <button type="button" onClick={() => void discardLocalDraft()}>丢弃本地草稿</button>
+      {cloudConflictDocument ? (
+        <section className="floating-panel migration-panel migration-popover" aria-label="云端存档冲突">
+          <strong>发现云端存档</strong>
+          <p>是否用云端数据覆盖本地？</p>
+          <button type="button" onClick={acceptCloudOverwrite}>是</button>
+          <button type="button" onClick={keepLocalDraft}>否</button>
         </section>
       ) : null}
 

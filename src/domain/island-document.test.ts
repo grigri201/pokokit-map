@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   createDefaultIslandDocument,
   createIslandRegion,
+  currentIslandMapId,
+  hashIslandDocumentSnapshot,
   islandRegionLabelMaxLength,
   islandRegionPalette,
   isIslandDocumentV1,
@@ -18,7 +20,52 @@ describe('island document region creation', () => {
   it('creates the default reference island grid', () => {
     const document = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
 
+    expect(document.activeMapId).toBe(currentIslandMapId);
+    expect(document.maps[0]?.id).toBe(currentIslandMapId);
     expect(document.maps[0]?.grid).toEqual(referenceIslandGrid);
+  });
+
+  it('normalizes legacy single-map ids to the current cloud island id', () => {
+    const document = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
+    const { backgroundColor: _backgroundColor, ...legacyMap } = document.maps[0]!;
+    const legacy = {
+      ...document,
+      activeMapId: 'map-1',
+      maps: [
+        {
+          ...legacyMap,
+          id: 'map-1',
+        },
+      ],
+    };
+
+    const normalized = normalizeIslandDocumentGrid(legacy, '2026-06-13T01:00:00.000Z');
+
+    expect(normalized.activeMapId).toBe(currentIslandMapId);
+    expect(normalized.maps[0]?.id).toBe(currentIslandMapId);
+    expect(normalized.maps[0]?.backgroundColor).toBe('#2d8be8');
+  });
+
+  it('hashes meaningful saved content without timestamp-only drift', () => {
+    const first = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
+    const second = {
+      ...first,
+      updatedAt: '2026-06-13T01:00:00.000Z',
+      maps: first.maps.map(map => ({
+        ...map,
+        regions: map.regions.map(region => ({
+          ...region,
+          updatedAt: '2026-06-13T01:00:00.000Z',
+        })),
+      })),
+    };
+    const renamed = {
+      ...first,
+      maps: first.maps.map(map => ({ ...map, name: 'Renamed island' })),
+    };
+
+    expect(hashIslandDocumentSnapshot(first)).toBe(hashIslandDocumentSnapshot(second));
+    expect(hashIslandDocumentSnapshot(first)).not.toBe(hashIslandDocumentSnapshot(renamed));
   });
 
   it('keeps region marker colors away from blue hues', () => {

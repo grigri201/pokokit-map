@@ -186,6 +186,11 @@ textarea {
   outline: none;
 }
 
+.file-menu-item:disabled {
+  cursor: progress;
+  opacity: 0.55;
+}
+
 .migration-popover {
   position: absolute;
   top: 132px;
