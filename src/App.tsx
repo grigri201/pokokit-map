@@ -240,10 +240,13 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
       }
 
       let session = await restoreDomainSession(config.apiBaseUrl, fetcher);
-      if (session.status !== 'authenticated' && authClient) {
+      if ((session.status !== 'authenticated' || session.user.nickname === undefined) && authClient) {
         const supabaseSession = await authClient.getSession().catch(() => null);
         if (supabaseSession) {
-          session = await syncDomainSession(config.apiBaseUrl, supabaseSession.access_token, fetcher);
+          const syncedSession = await syncDomainSession(config.apiBaseUrl, supabaseSession.access_token, fetcher);
+          if (syncedSession.status === 'authenticated' || session.status !== 'authenticated') {
+            session = syncedSession;
+          }
         }
       }
       if (cancelled) {

@@ -107,6 +107,34 @@ describe('Island Designer scaffold persistence', () => {
     expect(within(toolbar).getByRole('button', { name: 'Owner' })).toBeInTheDocument();
   });
 
+  it('refreshes restored domain sessions that do not include a nickname', async () => {
+    const session = createSupabaseSession();
+    const authClient = mockAuthClient({
+      getSession: vi.fn(async () => session),
+    });
+    const fetcher = mockFetch([
+      { data: { user: { id: 'owner-1' } } },
+      { data: { user: { id: 'owner-1', nickname: 'Owner' } } },
+      { data: [] },
+    ]);
+
+    render(<App config={config} fetcher={fetcher} storage={memoryStorage()} authClient={authClient} />);
+
+    const toolbar = await screen.findByRole('group', { name: '主工具栏' });
+    await waitFor(() => {
+      expect(authClient.getSession).toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledWith(
+        'https://api.test/api/v1/auth/session',
+        expect.objectContaining({
+          method: 'POST',
+          credentials: 'include',
+          headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
+        }),
+      );
+    });
+    expect(within(toolbar).getByRole('button', { name: 'Owner' })).toBeInTheDocument();
+  });
+
   it('keeps local editing when Supabase login cannot sync a Pokokit domain session', async () => {
     const session = createSupabaseSession();
     const authClient = mockAuthClient({
