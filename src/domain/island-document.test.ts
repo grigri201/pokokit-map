@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createDefaultIslandDocument,
   createIslandRegion,
+  islandRegionLabelMaxLength,
   islandRegionPalette,
   isIslandDocumentV1,
   nextIslandRegionId,
@@ -171,7 +172,25 @@ describe('island document region creation', () => {
     expect(nextIslandRegionId(first.document.maps[0]?.regions ?? [], 1)).toBe('region-2');
   });
 
-  it('updates an existing region label, notes, and cells', () => {
+  it('limits region labels to 100 characters', () => {
+    const document = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
+    const longLabel = '花'.repeat(120);
+    const result = createIslandRegion(document, {
+      id: 'region-1',
+      label: longLabel,
+      color: islandRegionPalette[1],
+      cells: [{ x: 1, y: 1 }],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(result.region.label).toHaveLength(islandRegionLabelMaxLength);
+    expect(result.region.label).toBe('花'.repeat(100));
+  });
+
+  it('updates an existing region label and cells while preserving notes by default', () => {
     const document = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
     const created = createIslandRegion(document, {
       id: 'region-1',
@@ -189,7 +208,6 @@ describe('island document region creation', () => {
     const updated = updateIslandRegion(created.document, {
       regionId: 'region-1',
       label: '  新花园区  ',
-      note: '第一条\n\n第二条  ',
       cells: [{ x: 2, y: 2 }, { x: 2, y: 2 }, { x: 999, y: 2 }],
       now: '2026-06-13T02:00:00.000Z',
     });
@@ -203,7 +221,7 @@ describe('island document region creation', () => {
       label: '新花园区',
       color: islandRegionPalette[1],
       cells: [{ x: 2, y: 2 }],
-      notes: [{ id: 'region-1-note-1', text: '第一条' }, { id: 'region-1-note-2', text: '第二条' }],
+      notes: [{ id: 'region-1-note-1', text: '旧注释' }],
       createdAt: '2026-06-13T01:00:00.000Z',
       updatedAt: '2026-06-13T02:00:00.000Z',
     });

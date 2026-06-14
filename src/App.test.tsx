@@ -467,8 +467,11 @@ describe('Island Designer scaffold persistence', () => {
     expect(screen.queryByLabelText('已选择格子数量')).not.toBeInTheDocument();
     expect(screen.getByLabelText('选区操作菜单')).toHaveTextContent('16×16');
     await userEvent.click(screen.getByRole('button', { name: '命名选区' }));
-    await userEvent.type(screen.getByLabelText('区域名称'), '入口花园');
-    await userEvent.type(screen.getByLabelText('区域注释'), '这里放欢迎区和花圃');
+    const titleInput = screen.getByLabelText('区域名称');
+    expect(titleInput).toHaveAttribute('maxLength', '100');
+    expect(screen.queryByLabelText('区域注释')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('命名待建造区域')).not.toHaveTextContent('16×16');
+    await userEvent.type(titleInput, '入口花园');
     await userEvent.click(screen.getByRole('button', { name: '保存待建造区域' }));
 
     expect(cell).toHaveAttribute('data-region-id', 'region-1');
@@ -762,7 +765,8 @@ describe('Island Designer scaffold persistence', () => {
     await userEvent.click(within(initialActionMenu).getByRole('button', { name: '编辑区域内容' }));
     const editForm = screen.getByLabelText('编辑待建造区域');
     expect(within(editForm).getByLabelText('区域名称')).toHaveValue('超级地球');
-    expect(within(editForm).getByLabelText('区域注释')).toHaveValue('第一条注释');
+    expect(within(editForm).getByLabelText('区域名称')).toHaveAttribute('maxLength', '100');
+    expect(within(editForm).queryByLabelText('区域注释')).not.toBeInTheDocument();
 
     await userEvent.click(within(editForm).getByRole('button', { name: '取消编辑' }));
     fireEvent.click(originalCell);
@@ -780,17 +784,15 @@ describe('Island Designer scaffold persistence', () => {
     const expandedEditForm = screen.getByLabelText('编辑待建造区域');
     await userEvent.clear(within(expandedEditForm).getByLabelText('区域名称'));
     await userEvent.type(within(expandedEditForm).getByLabelText('区域名称'), '超级地球二期');
-    await userEvent.clear(within(expandedEditForm).getByLabelText('区域注释'));
-    await userEvent.type(within(expandedEditForm).getByLabelText('区域注释'), '更新后注释');
     await userEvent.click(within(expandedEditForm).getByRole('button', { name: '保存区域修改' }));
 
     expect(originalCell).toHaveAttribute('data-region-id', 'region-1');
     expect(addedCell).toHaveAttribute('data-region-id', 'region-1');
-    expect(screen.getByLabelText('超级地球二期 注释')).toHaveTextContent('更新后注释');
+    expect(screen.getByLabelText('超级地球二期 注释')).toHaveTextContent('第一条注释');
     await waitFor(() => {
       const saved = JSON.parse(storage.getItem(localIslandStorageKey)!);
       expect(saved.maps[0].regions[0].label).toBe('超级地球二期');
-      expect(saved.maps[0].regions[0].notes).toMatchObject([{ text: '更新后注释' }]);
+      expect(saved.maps[0].regions[0].notes).toMatchObject([{ text: '第一条注释' }]);
       expect(saved.maps[0].regions[0].cells).toHaveLength(32 * 16);
     });
   });
@@ -988,7 +990,7 @@ function throwingStorage(): StorageLike {
   };
 }
 
-async function createRegionFromCells(label: string, startTestId: string, endTestId?: string, note = '初始注释') {
+async function createRegionFromCells(label: string, startTestId: string, endTestId?: string, note = '') {
   await screen.findByRole('group', { name: '主工具栏' });
   const start = screen.getByTestId(startTestId);
   fireEvent.pointerDown(start);
@@ -1003,8 +1005,14 @@ async function createRegionFromCells(label: string, startTestId: string, endTest
   await userEvent.click(screen.getByRole('button', { name: '命名选区' }));
   await userEvent.clear(screen.getByLabelText('区域名称'));
   await userEvent.type(screen.getByLabelText('区域名称'), label);
-  if (note) {
-    await userEvent.type(screen.getByLabelText('区域注释'), note);
-  }
   await userEvent.click(screen.getByRole('button', { name: '保存待建造区域' }));
+
+  if (note) {
+    const list = screen.getByLabelText('待建造区域列表');
+    await userEvent.click(within(list).getByRole('button', { name: `1 ${label}` }));
+    const detail = screen.getByLabelText(`${label} 注释`);
+    await userEvent.type(within(detail).getByLabelText('新增注释'), note);
+    await userEvent.click(within(detail).getByRole('button', { name: '添加注释' }));
+    await userEvent.click(within(screen.getByLabelText(`${label} 注释`)).getByRole('button', { name: '取消注释' }));
+  }
 }

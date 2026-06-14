@@ -42,6 +42,7 @@ export interface IslandDocumentV1 {
 
 export const localIslandStorageKey = 'pokokit.islandDesigner.document.v1';
 export const islandRegionPalette = ['#d95f39', '#6f8f2f', '#c58a14', '#c94f7c', '#7a6a2e', '#e07a4f'] as const;
+export const islandRegionLabelMaxLength = 100;
 
 export interface CreateIslandRegionInput {
   id: string;
@@ -158,7 +159,7 @@ export function normalizeIslandDocumentGrid(document: IslandDocumentV1, now = ne
 
 export function createIslandRegion(document: IslandDocumentV1, input: CreateIslandRegionInput): CreateIslandRegionResult {
   const activeMap = getActiveMap(document);
-  const label = input.label.trim();
+  const label = normalizeRegionLabel(input.label);
   const now = input.now ?? new Date().toISOString();
 
   if (!label) {
@@ -238,7 +239,7 @@ export function appendIslandRegionNote(document: IslandDocumentV1, regionId: str
 
 export function updateIslandRegion(document: IslandDocumentV1, input: UpdateIslandRegionInput): UpdateIslandRegionResult {
   const activeMap = getActiveMap(document);
-  const label = input.label.trim();
+  const label = normalizeRegionLabel(input.label);
   const now = input.now ?? new Date().toISOString();
 
   if (!label) {
@@ -259,7 +260,7 @@ export function updateIslandRegion(document: IslandDocumentV1, input: UpdateIsla
     ...region,
     label,
     cells: normalizedCells,
-    notes: createEditableRegionNotes(input.regionId, input.note, now),
+    notes: input.note === undefined ? region.notes : createEditableRegionNotes(input.regionId, input.note, now),
     updatedAt: now,
   };
 
@@ -411,6 +412,10 @@ function createEditableRegionNotes(regionId: string, note: string | undefined, n
     .map(text => text.trim())
     .filter(Boolean)
     .map((text, index) => ({ id: `${regionId}-note-${index + 1}`, text, createdAt: now }));
+}
+
+function normalizeRegionLabel(label: string): string {
+  return label.trim().slice(0, islandRegionLabelMaxLength);
 }
 
 function uniqueInBoundsCells(cells: IslandCell[], grid: IslandMap['grid']): IslandCell[] {

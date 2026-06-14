@@ -61,7 +61,6 @@ type SelectionPopoverMode = 'actions' | 'name' | null;
 
 interface RegionDraft {
   label: string;
-  note: string;
 }
 
 interface RegionTooltip {
@@ -157,7 +156,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [migrationDraft, setMigrationDraft] = useState<IslandDocumentV1 | null>(null);
   const [selection, setSelection] = useState(clearSelection);
-  const [regionDraft, setRegionDraft] = useState<RegionDraft>({ label: '', note: '' });
+  const [regionDraft, setRegionDraft] = useState<RegionDraft>({ label: '' });
   const [regionError, setRegionError] = useState<string | null>(null);
   const [selectionPopoverMode, setSelectionPopoverMode] = useState<SelectionPopoverMode>(null);
   const [activeRegionDetailId, setActiveRegionDetailId] = useState<string | null>(null);
@@ -540,7 +539,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     lockedSelectionCellsRef.current = [];
     setSelection(clearSelection());
     setSelectionPopoverMode(null);
-    setRegionDraft({ label: '', note: '' });
+    setRegionDraft({ label: '' });
     setRegionNoteDraft('');
     setRegionError(null);
     setActiveTooltip(null);
@@ -635,7 +634,6 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
       const result = updateIslandRegion(document, {
         regionId: editingRegionId,
         label: regionDraft.label,
-        note: regionDraft.note,
         cells: selection.cells,
       });
       if (!result.ok) {
@@ -647,7 +645,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
       setSelection(clearSelection());
       lockedSelectionCellsRef.current = [];
       setSelectionPopoverMode(null);
-      setRegionDraft({ label: '', note: '' });
+      setRegionDraft({ label: '' });
       setRegionError(null);
       setActiveTooltip(null);
       setActiveRegionDetailId(result.region.id);
@@ -663,7 +661,6 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     const result = createIslandRegion(document, {
       id: regionId,
       label: regionDraft.label,
-      note: regionDraft.note,
       color: suggestedRegionColor,
       cells: selection.cells,
     });
@@ -676,7 +673,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setSelection(clearSelection());
     lockedSelectionCellsRef.current = [];
     setSelectionPopoverMode(null);
-    setRegionDraft({ label: '', note: '' });
+    setRegionDraft({ label: '' });
     setRegionError(null);
     setActiveTooltip(null);
     setActiveRegionDetailId(null);
@@ -686,10 +683,10 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setRegionSequence(current => current + 1);
     setSaveState('idle');
     setErrorMessage(null);
-  }, [activeMap.regions, document, editingRegionId, regionDraft.label, regionDraft.note, regionSequence, selection.cells, suggestedRegionColor]);
+  }, [activeMap.regions, document, editingRegionId, regionDraft.label, regionSequence, selection.cells, suggestedRegionColor]);
 
   const clearTransientMapUi = useCallback(() => {
-    setRegionDraft({ label: '', note: '' });
+    setRegionDraft({ label: '' });
     lockedSelectionCellsRef.current = [];
     setSelection(clearSelection());
     setSelectionPopoverMode(null);
@@ -726,7 +723,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
   }, [clearTransientMapUi]);
 
   const cancelRegionDraft = useCallback(() => {
-    setRegionDraft({ label: '', note: '' });
+    setRegionDraft({ label: '' });
     lockedSelectionCellsRef.current = [];
     setSelection(clearSelection());
     setSelectionPopoverMode(null);
@@ -748,7 +745,6 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
       if (editingRegion) {
         setRegionDraft({
           label: editingRegion.label,
-          note: formatRegionNotesForDraft(editingRegion),
         });
       }
     }
@@ -772,7 +768,6 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     });
     setRegionDraft({
       label: activeRegionDetail.label,
-      note: formatRegionNotesForDraft(activeRegionDetail),
     });
     setEditingRegionId(activeRegionDetail.id);
     setSelectionPopoverMode('actions');
@@ -1303,21 +1298,13 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
             </>
           ) : (
             <form onSubmit={submitRegionDraft}>
-              <strong className="selection-size">{formatSelectionSize(selectionBounds)}</strong>
               <input
                 className="region-title-input"
                 aria-label="区域名称"
                 value={regionDraft.label}
                 onChange={event => setRegionDraft(current => ({ ...current, label: event.target.value }))}
                 placeholder="例如：入口花园"
-              />
-              <textarea
-                className="region-note-input"
-                aria-label="区域注释"
-                value={regionDraft.note}
-                onChange={event => setRegionDraft(current => ({ ...current, note: event.target.value }))}
-                placeholder={editingRegionId ? '编辑注释，每行一条' : '添加注释'}
-                rows={3}
+                maxLength={100}
               />
               <div className="selection-command-row">
                 <button
@@ -1635,10 +1622,6 @@ function readSelectionBounds(cells: IslandCell[]): SelectionBounds | null {
 
 function formatSelectionSize(bounds: SelectionBounds): string {
   return `${bounds.width}×${bounds.height}`;
-}
-
-function formatRegionNotesForDraft(region: IslandRegion): string {
-  return region.notes.map(note => note.text).join('\n');
 }
 
 function readRegionBadgeAnchor(cells: IslandCell[], mapView: MapView): FloatingAnchor {
