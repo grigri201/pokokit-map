@@ -945,11 +945,11 @@ h2 {
 }
 
 .map-cell.saved {
-  background-color: color-mix(in srgb, var(--region-color) 60%, var(--terrain-color, #2d8be8));
+  background-color: var(--region-color);
 }
 
 .map-cell.saved.selected {
-  background-color: color-mix(in srgb, var(--region-color) 60%, #f3d77a);
+  background-color: var(--region-color);
 }
 
 .subcell-layer {
@@ -967,11 +967,11 @@ h2 {
 }
 
 .map-subcell.saved {
-  background: color-mix(in srgb, var(--region-color) 60%, transparent);
+  background: var(--region-color);
 }
 
 .map-subcell.saved.selected {
-  background: color-mix(in srgb, var(--region-color) 60%, #f3d77a);
+  background: var(--region-color);
 }
 
 .map-subcell.focused {
