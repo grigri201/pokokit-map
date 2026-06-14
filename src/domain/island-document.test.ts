@@ -9,6 +9,7 @@ import {
   normalizeIslandDocumentGrid,
   removeIslandRegion,
   updateActiveIslandMapTerrainColors,
+  updateIslandRegion,
 } from './island-document';
 import { referenceIslandGrid, referenceIslandMacroGrid, referenceIslandSubdivisions } from './island-terrain';
 
@@ -168,6 +169,45 @@ describe('island document region creation', () => {
     }
 
     expect(nextIslandRegionId(first.document.maps[0]?.regions ?? [], 1)).toBe('region-2');
+  });
+
+  it('updates an existing region label, notes, and cells', () => {
+    const document = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
+    const created = createIslandRegion(document, {
+      id: 'region-1',
+      label: '花园区',
+      note: '旧注释',
+      color: islandRegionPalette[1],
+      cells: [{ x: 1, y: 1 }],
+      now: '2026-06-13T01:00:00.000Z',
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) {
+      return;
+    }
+
+    const updated = updateIslandRegion(created.document, {
+      regionId: 'region-1',
+      label: '  新花园区  ',
+      note: '第一条\n\n第二条  ',
+      cells: [{ x: 2, y: 2 }, { x: 2, y: 2 }, { x: 999, y: 2 }],
+      now: '2026-06-13T02:00:00.000Z',
+    });
+
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) {
+      return;
+    }
+    expect(updated.region).toMatchObject({
+      id: 'region-1',
+      label: '新花园区',
+      color: islandRegionPalette[1],
+      cells: [{ x: 2, y: 2 }],
+      notes: [{ id: 'region-1-note-1', text: '第一条' }, { id: 'region-1-note-2', text: '第二条' }],
+      createdAt: '2026-06-13T01:00:00.000Z',
+      updatedAt: '2026-06-13T02:00:00.000Z',
+    });
+    expect(updated.document.maps[0]?.regions).toEqual([updated.region]);
   });
 
   it('removes a region from the active map', () => {

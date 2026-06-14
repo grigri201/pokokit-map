@@ -753,7 +753,22 @@ describe('Island Designer scaffold persistence', () => {
 
     expect(screen.queryByLabelText('超级地球 注释')).not.toBeInTheDocument();
     expect(originalCell).toHaveClass('selected');
+    const initialActionMenu = screen.getByLabelText('选区操作菜单');
+    expect(initialActionMenu).toHaveTextContent('16×16');
+    expect(within(initialActionMenu).getByRole('button', { name: '继续添加选区' })).toBeInTheDocument();
+    expect(within(initialActionMenu).getByRole('button', { name: '编辑区域内容' })).toBeInTheDocument();
+    expect(within(initialActionMenu).getByRole('button', { name: '取消选区' })).toBeInTheDocument();
 
+    await userEvent.click(within(initialActionMenu).getByRole('button', { name: '编辑区域内容' }));
+    const editForm = screen.getByLabelText('编辑待建造区域');
+    expect(within(editForm).getByLabelText('区域名称')).toHaveValue('超级地球');
+    expect(within(editForm).getByLabelText('区域注释')).toHaveValue('第一条注释');
+
+    await userEvent.click(within(editForm).getByRole('button', { name: '取消编辑' }));
+    fireEvent.click(originalCell);
+    await userEvent.click(within(screen.getByLabelText('超级地球 注释')).getByRole('button', { name: '编辑区域格子' }));
+
+    await userEvent.click(within(screen.getByLabelText('选区操作菜单')).getByRole('button', { name: '继续添加选区' }));
     fireEvent.pointerDown(addedCell);
     fireEvent.pointerUp(addedCell);
 
@@ -761,13 +776,21 @@ describe('Island Designer scaffold persistence', () => {
     expect(actionMenu).toHaveTextContent('32×16');
     expect(screen.queryByLabelText('命名待建造区域')).not.toBeInTheDocument();
 
-    await userEvent.click(within(actionMenu).getByRole('button', { name: '保存区域格子' }));
+    await userEvent.click(within(actionMenu).getByRole('button', { name: '编辑区域内容' }));
+    const expandedEditForm = screen.getByLabelText('编辑待建造区域');
+    await userEvent.clear(within(expandedEditForm).getByLabelText('区域名称'));
+    await userEvent.type(within(expandedEditForm).getByLabelText('区域名称'), '超级地球二期');
+    await userEvent.clear(within(expandedEditForm).getByLabelText('区域注释'));
+    await userEvent.type(within(expandedEditForm).getByLabelText('区域注释'), '更新后注释');
+    await userEvent.click(within(expandedEditForm).getByRole('button', { name: '保存区域修改' }));
 
     expect(originalCell).toHaveAttribute('data-region-id', 'region-1');
     expect(addedCell).toHaveAttribute('data-region-id', 'region-1');
-    expect(screen.getByLabelText('超级地球 注释')).toHaveTextContent('第一条注释');
+    expect(screen.getByLabelText('超级地球二期 注释')).toHaveTextContent('更新后注释');
     await waitFor(() => {
       const saved = JSON.parse(storage.getItem(localIslandStorageKey)!);
+      expect(saved.maps[0].regions[0].label).toBe('超级地球二期');
+      expect(saved.maps[0].regions[0].notes).toMatchObject([{ text: '更新后注释' }]);
       expect(saved.maps[0].regions[0].cells).toHaveLength(32 * 16);
     });
   });

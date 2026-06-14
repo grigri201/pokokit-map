@@ -23,7 +23,7 @@ import {
   nextIslandRegionId,
   removeIslandRegion,
   updateActiveIslandMapTerrainColors,
-  updateIslandRegionCells,
+  updateIslandRegion,
   type IslandCell,
   type IslandDocumentV1,
   type IslandRegion,
@@ -461,7 +461,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
         ? '保存失败'
         : isCloud ? '云端待保存' : '本地待保存';
   const accountLabel = auth.status === 'authenticated' ? auth.user.email ?? auth.user.id : '登录';
-  const canCreateRegion = selection.cells.length > 0 && regionDraft.label.trim().length > 0;
+  const canSaveRegionDraft = selection.cells.length > 0 && regionDraft.label.trim().length > 0;
   const focusMapTitleInput = useCallback(() => {
     mapTitleInputRef.current?.focus();
   }, []);
@@ -629,8 +629,36 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     showRegionTooltip(null, null);
   }, [editingRegionId, mapDetailBlockSize, openRegionDetail, regionByCell, showRegionTooltip]);
 
-  const createRegion = useCallback((event: FormEvent<HTMLFormElement>) => {
+  const submitRegionDraft = useCallback((event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (editingRegionId) {
+      const result = updateIslandRegion(document, {
+        regionId: editingRegionId,
+        label: regionDraft.label,
+        note: regionDraft.note,
+        cells: selection.cells,
+      });
+      if (!result.ok) {
+        setRegionError(result.message);
+        return;
+      }
+
+      setDocument(result.document);
+      setSelection(clearSelection());
+      lockedSelectionCellsRef.current = [];
+      setSelectionPopoverMode(null);
+      setRegionDraft({ label: '', note: '' });
+      setRegionError(null);
+      setActiveTooltip(null);
+      setActiveRegionDetailId(result.region.id);
+      setFocusedRegionId(result.region.id);
+      setFlashRegionId(result.region.id);
+      setEditingRegionId(null);
+      setSaveState('idle');
+      setErrorMessage(null);
+      return;
+    }
+
     const regionId = nextIslandRegionId(activeMap.regions, regionSequence);
     const result = createIslandRegion(document, {
       id: regionId,
@@ -658,7 +686,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setRegionSequence(current => current + 1);
     setSaveState('idle');
     setErrorMessage(null);
-  }, [activeMap.regions, document, regionDraft.label, regionDraft.note, regionSequence, selection.cells, suggestedRegionColor]);
+  }, [activeMap.regions, document, editingRegionId, regionDraft.label, regionDraft.note, regionSequence, selection.cells, suggestedRegionColor]);
 
   const clearTransientMapUi = useCallback(() => {
     setRegionDraft({ label: '', note: '' });
@@ -714,11 +742,20 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
     setActiveTooltip(null);
   }, [selection.cells]);
 
-  const showNamePopover = useCallback(() => {
+  const showRegionDraftPopover = useCallback(() => {
+    if (editingRegionId) {
+      const editingRegion = activeMap.regions.find(region => region.id === editingRegionId);
+      if (editingRegion) {
+        setRegionDraft({
+          label: editingRegion.label,
+          note: formatRegionNotesForDraft(editingRegion),
+        });
+      }
+    }
     setSelectionPopoverMode('name');
     setRegionError(null);
     setActiveTooltip(null);
-  }, []);
+  }, [activeMap.regions, editingRegionId]);
 
   const startEditingRegionCells = useCallback(() => {
     if (!activeRegionDetail) {
@@ -733,39 +770,18 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
       cells: activeRegionDetail.cells,
       dragging: false,
     });
+    setRegionDraft({
+      label: activeRegionDetail.label,
+      note: formatRegionNotesForDraft(activeRegionDetail),
+    });
     setEditingRegionId(activeRegionDetail.id);
-    setSelectionPopoverMode(null);
+    setSelectionPopoverMode('actions');
     setActiveRegionDetailId(null);
     setRegionNoteDraft('');
     setPendingDeleteRegionId(null);
     setRegionError(null);
     setActiveTooltip(null);
   }, [activeRegionDetail]);
-
-  const saveEditingRegionCells = useCallback(() => {
-    if (!editingRegionId) {
-      return;
-    }
-    const result = updateIslandRegionCells(document, editingRegionId, selection.cells);
-    if (!result.ok) {
-      setRegionError(result.message);
-      return;
-    }
-
-    setDocument(result.document);
-    setSelection(clearSelection());
-    lockedSelectionCellsRef.current = [];
-    setSelectionPopoverMode(null);
-    setRegionDraft({ label: '', note: '' });
-    setRegionError(null);
-    setActiveTooltip(null);
-    setActiveRegionDetailId(result.region.id);
-    setFocusedRegionId(result.region.id);
-    setFlashRegionId(result.region.id);
-    setEditingRegionId(null);
-    setSaveState('idle');
-    setErrorMessage(null);
-  }, [document, editingRegionId, selection.cells]);
 
   const selectRegion = useCallback((region: IslandRegion) => {
     const firstCell = region.cells[0];
@@ -1262,7 +1278,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
       {selectionPopoverMode && selectionBounds && selectionAnchor ? (
         <aside
           className={`floating-panel selection-popover ${selectionPopoverMode === 'name' ? 'name-mode' : 'action-mode'}`}
-          aria-label={selectionPopoverMode === 'name' ? '命名待建造区域' : '选区操作菜单'}
+          aria-label={selectionPopoverMode === 'name' ? editingRegionId ? '编辑待建造区域' : '命名待建造区域' : '选区操作菜单'}
           style={{
             '--selection-popover-left': `${selectionAnchor.x}px`,
             '--selection-popover-top': `${selectionAnchor.y}px`,
@@ -1276,9 +1292,9 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
                 <button
                   className="icon-action confirm"
                   type="button"
-                  aria-label={editingRegionId ? '保存区域格子' : '命名选区'}
-                  title={editingRegionId ? '保存区域格子' : '命名选区'}
-                  onClick={editingRegionId ? saveEditingRegionCells : showNamePopover}
+                  aria-label={editingRegionId ? '编辑区域内容' : '命名选区'}
+                  title={editingRegionId ? '编辑区域内容' : '命名选区'}
+                  onClick={showRegionDraftPopover}
                 >
                   ✓
                 </button>
@@ -1286,7 +1302,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
               </div>
             </>
           ) : (
-            <form onSubmit={createRegion}>
+            <form onSubmit={submitRegionDraft}>
               <strong className="selection-size">{formatSelectionSize(selectionBounds)}</strong>
               <input
                 className="region-title-input"
@@ -1300,12 +1316,28 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
                 aria-label="区域注释"
                 value={regionDraft.note}
                 onChange={event => setRegionDraft(current => ({ ...current, note: event.target.value }))}
-                placeholder="添加注释"
+                placeholder={editingRegionId ? '编辑注释，每行一条' : '添加注释'}
                 rows={3}
               />
               <div className="selection-command-row">
-                <button className="icon-action confirm" type="submit" disabled={!canCreateRegion} aria-label="保存待建造区域" title="保存待建造区域">✓</button>
-                <button className="icon-action cancel" type="button" aria-label="取消命名" title="取消命名" onClick={cancelRegionDraft}>×</button>
+                <button
+                  className="icon-action confirm"
+                  type="submit"
+                  disabled={!canSaveRegionDraft}
+                  aria-label={editingRegionId ? '保存区域修改' : '保存待建造区域'}
+                  title={editingRegionId ? '保存区域修改' : '保存待建造区域'}
+                >
+                  ✓
+                </button>
+                <button
+                  className="icon-action cancel"
+                  type="button"
+                  aria-label={editingRegionId ? '取消编辑' : '取消命名'}
+                  title={editingRegionId ? '取消编辑' : '取消命名'}
+                  onClick={cancelRegionDraft}
+                >
+                  ×
+                </button>
               </div>
               {regionError ? <p className="safe-error compact">{regionError}</p> : null}
             </form>
@@ -1603,6 +1635,10 @@ function readSelectionBounds(cells: IslandCell[]): SelectionBounds | null {
 
 function formatSelectionSize(bounds: SelectionBounds): string {
   return `${bounds.width}×${bounds.height}`;
+}
+
+function formatRegionNotesForDraft(region: IslandRegion): string {
+  return region.notes.map(note => note.text).join('\n');
 }
 
 function readRegionBadgeAnchor(cells: IslandCell[], mapView: MapView): FloatingAnchor {

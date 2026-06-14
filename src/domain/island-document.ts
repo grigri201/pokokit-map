@@ -52,6 +52,14 @@ export interface CreateIslandRegionInput {
   now?: string;
 }
 
+export interface UpdateIslandRegionInput {
+  regionId: string;
+  label: string;
+  note?: string;
+  cells: IslandCell[];
+  now?: string;
+}
+
 export type CreateIslandRegionResult =
   | { ok: true; document: IslandDocumentV1; region: IslandRegion }
   | { ok: false; message: string };
@@ -64,7 +72,7 @@ export type AppendIslandRegionNoteResult =
   | { ok: true; document: IslandDocumentV1; region: IslandRegion; note: IslandRegionNote }
   | { ok: false; message: string };
 
-export type UpdateIslandRegionCellsResult =
+export type UpdateIslandRegionResult =
   | { ok: true; document: IslandDocumentV1; region: IslandRegion }
   | { ok: false; message: string };
 
@@ -228,21 +236,30 @@ export function appendIslandRegionNote(document: IslandDocumentV1, regionId: str
   };
 }
 
-export function updateIslandRegionCells(document: IslandDocumentV1, regionId: string, cells: IslandCell[], now = new Date().toISOString()): UpdateIslandRegionCellsResult {
+export function updateIslandRegion(document: IslandDocumentV1, input: UpdateIslandRegionInput): UpdateIslandRegionResult {
   const activeMap = getActiveMap(document);
-  const region = activeMap.regions.find(candidate => candidate.id === regionId);
+  const label = input.label.trim();
+  const now = input.now ?? new Date().toISOString();
+
+  if (!label) {
+    return { ok: false, message: '请填写区域标题。' };
+  }
+
+  const region = activeMap.regions.find(candidate => candidate.id === input.regionId);
   if (!region) {
     return { ok: false, message: '未找到待建造区域。' };
   }
 
-  const normalizedCells = uniqueInBoundsCells(cells, activeMap.grid);
+  const normalizedCells = uniqueInBoundsCells(input.cells, activeMap.grid);
   if (normalizedCells.length === 0) {
     return { ok: false, message: '请先选择地图格子。' };
   }
 
   const updatedRegion = {
     ...region,
+    label,
     cells: normalizedCells,
+    notes: createEditableRegionNotes(input.regionId, input.note, now),
     updatedAt: now,
   };
 
@@ -254,7 +271,7 @@ export function updateIslandRegionCells(document: IslandDocumentV1, regionId: st
       updatedAt: now,
       maps: document.maps.map(map => (
         map.id === activeMap.id
-          ? { ...map, regions: map.regions.map(candidate => candidate.id === regionId ? updatedRegion : candidate) }
+          ? { ...map, regions: map.regions.map(candidate => candidate.id === input.regionId ? updatedRegion : candidate) }
           : map
       )),
     },
@@ -386,6 +403,14 @@ function isBlueHue(hexColor: string): boolean {
 function createInitialRegionNotes(regionId: string, note: string | undefined, now: string): IslandRegionNote[] {
   const text = note?.trim();
   return text ? [{ id: `${regionId}-note-1`, text, createdAt: now }] : [];
+}
+
+function createEditableRegionNotes(regionId: string, note: string | undefined, now: string): IslandRegionNote[] {
+  return (note ?? '')
+    .split(/\r?\n/)
+    .map(text => text.trim())
+    .filter(Boolean)
+    .map((text, index) => ({ id: `${regionId}-note-${index + 1}`, text, createdAt: now }));
 }
 
 function uniqueInBoundsCells(cells: IslandCell[], grid: IslandMap['grid']): IslandCell[] {
