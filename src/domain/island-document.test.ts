@@ -12,7 +12,7 @@ import {
   updateActiveIslandMapTerrainColors,
   updateIslandRegion,
 } from './island-document';
-import { referenceIslandGrid, referenceIslandMacroGrid, referenceIslandSubdivisions } from './island-terrain';
+import { referenceIslandGrid, referenceIslandSubdivisions, referenceIslandTerrainGrid } from './island-terrain';
 
 describe('island document region creation', () => {
   it('creates the default reference island grid', () => {
@@ -27,8 +27,8 @@ describe('island document region creation', () => {
 
   it('stores imported terrain colors on the active map', () => {
     const document = createDefaultIslandDocument('2026-06-13T00:00:00.000Z');
-    const terrainColors = Array.from({ length: referenceIslandMacroGrid.height }, () =>
-      Array.from({ length: referenceIslandMacroGrid.width }, () => '#aabbcc'),
+    const terrainColors = Array.from({ length: referenceIslandTerrainGrid.height }, () =>
+      Array.from({ length: referenceIslandTerrainGrid.width }, () => '#aabbcc'),
     );
 
     const updated = updateActiveIslandMapTerrainColors(document, terrainColors, '2026-06-13T01:00:00.000Z');

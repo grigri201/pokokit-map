@@ -11,10 +11,17 @@ export const referenceIslandMacroGrid = {
 } as const;
 
 export const referenceIslandSubdivisions = 16;
+export const referenceIslandTerrainSubdivisions = 4;
+export const referenceIslandTerrainBlockSize = referenceIslandSubdivisions / referenceIslandTerrainSubdivisions;
 
 export const referenceIslandGrid = {
   width: referenceIslandMacroGrid.width * referenceIslandSubdivisions,
   height: referenceIslandMacroGrid.height * referenceIslandSubdivisions,
+} as const;
+
+export const referenceIslandTerrainGrid = {
+  width: referenceIslandMacroGrid.width * referenceIslandTerrainSubdivisions,
+  height: referenceIslandMacroGrid.height * referenceIslandTerrainSubdivisions,
 } as const;
 
 export const referenceIslandWaterColor = '#2d8be8';
@@ -53,14 +60,24 @@ export const referenceIslandTerrainColors = [
 ] as const;
 
 export function getReferenceIslandCellColor(cell: TerrainCell, terrainColors?: IslandTerrainColors): string {
+  const importedColor = getReferenceIslandImportedCellColor(cell, terrainColors);
+  if (importedColor) {
+    return importedColor;
+  }
+
   return getReferenceIslandMacroCellColor({
     x: Math.floor(cell.x / referenceIslandSubdivisions),
     y: Math.floor(cell.y / referenceIslandSubdivisions),
-  }, terrainColors);
+  });
 }
 
 export function getReferenceIslandMacroCellColor(cell: TerrainCell, terrainColors?: IslandTerrainColors): string {
-  const importedColor = terrainColors?.[cell.y]?.[cell.x];
+  const importedColor = terrainColors
+    ? getReferenceIslandTerrainBlockColor({
+      x: cell.x * referenceIslandTerrainSubdivisions + Math.floor(referenceIslandTerrainSubdivisions / 2),
+      y: cell.y * referenceIslandTerrainSubdivisions + Math.floor(referenceIslandTerrainSubdivisions / 2),
+    }, terrainColors)
+    : null;
   if (importedColor) {
     return importedColor;
   }
@@ -73,17 +90,21 @@ export function getReferenceIslandMacroCellColor(cell: TerrainCell, terrainColor
   return isBlueReferenceTerrainColor(originalColor) ? originalColor : referenceIslandUnifiedLandColor;
 }
 
+export function getReferenceIslandTerrainBlockColor(cell: TerrainCell, terrainColors?: IslandTerrainColors): string | null {
+  return terrainColors?.[cell.y]?.[cell.x] ?? null;
+}
+
 export function sampleReferenceIslandTerrainColorsFromImageData(imageData: {
   data: ArrayLike<number>;
   width: number;
   height: number;
 }): IslandTerrainColors {
   const colors: IslandTerrainColors = [];
-  for (let y = 0; y < referenceIslandMacroGrid.height; y += 1) {
+  for (let y = 0; y < referenceIslandTerrainGrid.height; y += 1) {
     const row: string[] = [];
-    const sourceY = clampInteger(Math.floor(((y + 0.5) / referenceIslandMacroGrid.height) * imageData.height), 0, imageData.height - 1);
-    for (let x = 0; x < referenceIslandMacroGrid.width; x += 1) {
-      const sourceX = clampInteger(Math.floor(((x + 0.5) / referenceIslandMacroGrid.width) * imageData.width), 0, imageData.width - 1);
+    const sourceY = clampInteger(Math.floor(((y + 0.5) / referenceIslandTerrainGrid.height) * imageData.height), 0, imageData.height - 1);
+    for (let x = 0; x < referenceIslandTerrainGrid.width; x += 1) {
+      const sourceX = clampInteger(Math.floor(((x + 0.5) / referenceIslandTerrainGrid.width) * imageData.width), 0, imageData.width - 1);
       const offset = (sourceY * imageData.width + sourceX) * 4;
       row.push(rgbToHex(
         imageData.data[offset] ?? 0,
@@ -100,13 +121,24 @@ export function sampleReferenceIslandTerrainColorsFromImageData(imageData: {
 export function isIslandTerrainColors(value: unknown): value is IslandTerrainColors {
   return (
     Array.isArray(value) &&
-    value.length === referenceIslandMacroGrid.height &&
+    value.length === referenceIslandTerrainGrid.height &&
     value.every(row => (
       Array.isArray(row) &&
-      row.length === referenceIslandMacroGrid.width &&
+      row.length === referenceIslandTerrainGrid.width &&
       row.every(color => typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color))
     ))
   );
+}
+
+function getReferenceIslandImportedCellColor(cell: TerrainCell, terrainColors?: IslandTerrainColors): string | null {
+  if (!terrainColors) {
+    return null;
+  }
+
+  return getReferenceIslandTerrainBlockColor({
+    x: Math.floor(cell.x / referenceIslandTerrainBlockSize),
+    y: Math.floor(cell.y / referenceIslandTerrainBlockSize),
+  }, terrainColors);
 }
 
 function isReferenceIslandUnifiedInteriorCell(cell: TerrainCell): boolean {

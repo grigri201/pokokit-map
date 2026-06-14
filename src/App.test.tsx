@@ -7,7 +7,7 @@ import { App } from './App';
 import type { IslandAuthClient } from './auth/supabase-client';
 import type { AppConfig } from './config';
 import { createDefaultIslandDocument, islandRegionPalette, localIslandStorageKey } from './domain/island-document';
-import { referenceIslandUnifiedLandColor } from './domain/island-terrain';
+import { referenceIslandTerrainGrid, referenceIslandUnifiedLandColor } from './domain/island-terrain';
 import type { StorageLike } from './persistence/local-island-store';
 
 const config: AppConfig = {
@@ -176,7 +176,8 @@ describe('Island Designer scaffold persistence', () => {
 
   it('imports a background image and uses its sampled colors for the map terrain', async () => {
     const imageData = createImageDataFixture('#123456');
-    paintImageDataCell(imageData, 2, 4, '#aabbcc');
+    paintImageDataCell(imageData, 2 * 4 + 2, 4 * 4 + 2, '#aabbcc');
+    paintImageDataCell(imageData, 2 * 4, 4 * 4, '#778899');
     installImageImportStubs(imageData);
     const file = new File(['image-bytes'], 'island.png', { type: 'image/png' });
 
@@ -189,6 +190,14 @@ describe('Island Designer scaffold persistence', () => {
 
     await waitFor(() => expect(screen.getByTestId('map-cell-0-0')).toHaveAttribute('style', expect.stringContaining('--terrain-color: #123456')));
     expect(screen.getByTestId('map-cell-2-4')).toHaveAttribute('style', expect.stringContaining('--terrain-color: #aabbcc'));
+    for (let index = 0; index < 4; index += 1) {
+      fireEvent.wheel(screen.getByTestId('map-canvas'), { deltaY: -100, clientX: 500, clientY: 300 });
+    }
+    const importedCell = screen.getByTestId('map-cell-2-4');
+    const terrainBlocks = importedCell.querySelectorAll('.terrain-subcell');
+    expect(terrainBlocks).toHaveLength(16);
+    expect(terrainBlocks[0]).toHaveAttribute('style', expect.stringContaining('--terrain-block-color: #778899'));
+    expect(terrainBlocks[10]).toHaveAttribute('style', expect.stringContaining('--terrain-block-color: #aabbcc'));
     expect(screen.getByRole('textbox', { name: '地图名称' })).toHaveValue('第一张岛屿地图');
     expect(screen.queryByRole('menu', { name: '文件菜单' })).not.toBeInTheDocument();
   });
@@ -904,13 +913,13 @@ function mockAuthClient(overrides: Partial<IslandAuthClient> = {}): IslandAuthCl
 }
 
 function createImageDataFixture(hexColor: string): ImageData {
-  const data = new Uint8ClampedArray(23 * 23 * 4);
-  for (let y = 0; y < 23; y += 1) {
-    for (let x = 0; x < 23; x += 1) {
-      paintImageDataCell({ data, width: 23, height: 23 } as ImageData, x, y, hexColor);
+  const data = new Uint8ClampedArray(referenceIslandTerrainGrid.width * referenceIslandTerrainGrid.height * 4);
+  for (let y = 0; y < referenceIslandTerrainGrid.height; y += 1) {
+    for (let x = 0; x < referenceIslandTerrainGrid.width; x += 1) {
+      paintImageDataCell({ data, width: referenceIslandTerrainGrid.width, height: referenceIslandTerrainGrid.height } as ImageData, x, y, hexColor);
     }
   }
-  return { data, width: 23, height: 23, colorSpace: 'srgb' } as ImageData;
+  return { data, width: referenceIslandTerrainGrid.width, height: referenceIslandTerrainGrid.height, colorSpace: 'srgb' } as ImageData;
 }
 
 function paintImageDataCell(imageData: ImageData, x: number, y: number, hexColor: string): void {

@@ -30,8 +30,11 @@ import {
 } from './domain/island-document';
 import {
   getReferenceIslandMacroCellColor,
+  getReferenceIslandTerrainBlockColor,
   referenceIslandMacroGrid,
   referenceIslandSubdivisions,
+  referenceIslandTerrainBlockSize,
+  referenceIslandTerrainSubdivisions,
   sampleReferenceIslandTerrainColorsFromImageData,
   type IslandTerrainColors,
 } from './domain/island-terrain';
@@ -98,6 +101,14 @@ interface SubcellOverlay {
   spanSize: number;
   region?: IslandRegion;
   selected: boolean;
+}
+
+interface TerrainCellOverlay {
+  key: string;
+  color: string;
+  localX: number;
+  localY: number;
+  spanSize: number;
 }
 
 interface MacroCellState {
@@ -974,6 +985,7 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
             {macroCells.map(cell => {
               const key = cellKey(cell);
               const macroState = readMacroCellState(cell, selectedCellKeys, regionByCell, showSubgrid, mapDetailBlockSize);
+              const terrainOverlays = showSubgrid ? readMacroTerrainCellOverlays(cell, activeMap.terrainColors) : [];
               const region = macroState.region;
               const selected = macroState.selected;
               const cellStyle = {
@@ -1013,6 +1025,21 @@ export function App({ config = readAppConfig(), fetcher = fetch, locale = readBr
                   onFocus={event => showRegionTooltip(readRegionTooltipInfoFromMacroState(macroState), event.currentTarget)}
                   onClick={event => handleCellClick(cell, event)}
                 >
+                  {terrainOverlays.length > 0 ? (
+                    <span className="terrain-cell-layer" aria-hidden="true">
+                      {terrainOverlays.map(overlay => (
+                        <span
+                          key={overlay.key}
+                          className="terrain-subcell"
+                          style={{
+                            '--terrain-block-color': overlay.color,
+                            gridColumn: `${overlay.localX + 1} / span ${overlay.spanSize}`,
+                            gridRow: `${overlay.localY + 1} / span ${overlay.spanSize}`,
+                          } as CSSProperties}
+                        />
+                      ))}
+                    </span>
+                  ) : null}
                   {showSubgrid && macroState.overlays.length > 0 ? (
                     <span className="subcell-layer" aria-hidden="true">
                       {macroState.overlays.map(overlay => {
@@ -1489,6 +1516,32 @@ function readMacroCellState(
     }
   }
   return { overlays, region: firstRegion, regionCellCount: firstRegion ? regionCounts.get(firstRegion.id) ?? 0 : 0, selected };
+}
+
+function readMacroTerrainCellOverlays(macroCell: IslandCell, terrainColors?: IslandTerrainColors): TerrainCellOverlay[] {
+  if (!terrainColors) {
+    return [];
+  }
+
+  const overlays: TerrainCellOverlay[] = [];
+  const baseX = macroCell.x * referenceIslandTerrainSubdivisions;
+  const baseY = macroCell.y * referenceIslandTerrainSubdivisions;
+  for (let terrainY = 0; terrainY < referenceIslandTerrainSubdivisions; terrainY += 1) {
+    for (let terrainX = 0; terrainX < referenceIslandTerrainSubdivisions; terrainX += 1) {
+      const color = getReferenceIslandTerrainBlockColor({ x: baseX + terrainX, y: baseY + terrainY }, terrainColors);
+      if (!color) {
+        continue;
+      }
+      overlays.push({
+        key: `${terrainX}:${terrainY}`,
+        color,
+        localX: terrainX * referenceIslandTerrainBlockSize,
+        localY: terrainY * referenceIslandTerrainBlockSize,
+        spanSize: referenceIslandTerrainBlockSize,
+      });
+    }
+  }
+  return overlays;
 }
 
 function readSubcellOverlayBlock(

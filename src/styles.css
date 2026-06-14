@@ -932,8 +932,13 @@ h2 {
   touch-action: none;
 }
 
-.map-surface.show-medium-grid .map-cell,
-.map-surface.show-fine-grid .map-cell {
+.map-surface.show-medium-grid .map-cell::after,
+.map-surface.show-fine-grid .map-cell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
   background-image:
     linear-gradient(to right, rgba(30, 52, 64, 0.56) var(--map-grid-line-width), transparent var(--map-grid-line-width)),
     linear-gradient(to bottom, rgba(30, 52, 64, 0.56) var(--map-grid-line-width), transparent var(--map-grid-line-width));
@@ -959,6 +964,7 @@ h2 {
   background-color: var(--region-color);
 }
 
+.terrain-cell-layer,
 .subcell-layer {
   position: absolute;
   inset: 0;
@@ -966,6 +972,18 @@ h2 {
   grid-template-columns: repeat(16, 1fr);
   grid-template-rows: repeat(16, 1fr);
   pointer-events: none;
+}
+
+.terrain-cell-layer {
+  z-index: 0;
+}
+
+.terrain-subcell {
+  background: var(--terrain-block-color);
+}
+
+.subcell-layer {
+  z-index: 2;
 }
 
 .map-subcell.selected {

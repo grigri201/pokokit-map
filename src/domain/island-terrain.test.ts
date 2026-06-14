@@ -5,6 +5,8 @@ import {
   getReferenceIslandMacroCellColor,
   referenceIslandMacroGrid,
   referenceIslandSubdivisions,
+  referenceIslandTerrainBlockSize,
+  referenceIslandTerrainGrid,
   referenceIslandUnifiedLandColor,
   sampleReferenceIslandTerrainColorsFromImageData,
 } from './island-terrain';
@@ -40,27 +42,33 @@ describe('reference island terrain colors', () => {
     expect(getReferenceIslandMacroCellColor({ x: 17, y: 1 })).toBe('#349ccb');
   });
 
-  it('samples uploaded image colors into the 23 by 23 terrain grid', () => {
+  it('samples uploaded image colors into the 23 by 23 grid with 4 by 4 terrain detail', () => {
     const imageData = createImageDataFixture('#112233');
-    paintImageDataCell(imageData, 22, 22, '#aabbcc');
+    const detailX = 22 * 4 + 2;
+    const detailY = 22 * 4 + 2;
+    paintImageDataCell(imageData, detailX, detailY, '#aabbcc');
 
     const terrainColors = sampleReferenceIslandTerrainColorsFromImageData(imageData);
 
-    expect(terrainColors).toHaveLength(referenceIslandMacroGrid.height);
-    expect(terrainColors[0]).toHaveLength(referenceIslandMacroGrid.width);
+    expect(terrainColors).toHaveLength(referenceIslandTerrainGrid.height);
+    expect(terrainColors[0]).toHaveLength(referenceIslandTerrainGrid.width);
     expect(terrainColors[0]?.[0]).toBe('#112233');
-    expect(terrainColors[22]?.[22]).toBe('#aabbcc');
+    expect(terrainColors[detailY]?.[detailX]).toBe('#aabbcc');
     expect(getReferenceIslandMacroCellColor({ x: 22, y: 22 }, terrainColors)).toBe('#aabbcc');
     expect(getReferenceIslandCellColor({
-      x: 22 * referenceIslandSubdivisions,
-      y: 22 * referenceIslandSubdivisions,
+      x: 22 * referenceIslandSubdivisions + 2 * referenceIslandTerrainBlockSize,
+      y: 22 * referenceIslandSubdivisions + 2 * referenceIslandTerrainBlockSize,
     }, terrainColors)).toBe('#aabbcc');
+    expect(getReferenceIslandCellColor({
+      x: 22 * referenceIslandSubdivisions + 3 * referenceIslandTerrainBlockSize,
+      y: 22 * referenceIslandSubdivisions + 3 * referenceIslandTerrainBlockSize,
+    }, terrainColors)).toBe('#112233');
   });
 });
 
 function createImageDataFixture(hexColor: string) {
-  const data = new Uint8ClampedArray(referenceIslandMacroGrid.width * referenceIslandMacroGrid.height * 4);
-  const imageData = { data, width: referenceIslandMacroGrid.width, height: referenceIslandMacroGrid.height };
+  const data = new Uint8ClampedArray(referenceIslandTerrainGrid.width * referenceIslandTerrainGrid.height * 4);
+  const imageData = { data, width: referenceIslandTerrainGrid.width, height: referenceIslandTerrainGrid.height };
   for (let y = 0; y < imageData.height; y += 1) {
     for (let x = 0; x < imageData.width; x += 1) {
       paintImageDataCell(imageData, x, y, hexColor);
